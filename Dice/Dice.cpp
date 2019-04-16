@@ -125,7 +125,7 @@ std::string getName(long long QQ, long long GroupID = 0)
 	if (GroupID)
 	{
 		/*Ⱥ*/
-		if (GroupID < 1000000000)
+		if (GroupID < 1000000000) 
 		{
 			return strip(Name->get(GroupID, QQ).empty()
 				? (getGroupMemberInfo(GroupID, QQ).GroupNick.empty()

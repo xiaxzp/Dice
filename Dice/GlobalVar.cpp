@@ -44,7 +44,6 @@ const std::string Dice_Full_Ver = Dice_Short_Ver + " [MSVC " + std::to_string(_M
 //GlobalMsg["strGetCardCatMessage"]
 std::map<std::string, std::string> GlobalMsg
 {
-	{"",""},
 	{"strGetBook1","恭喜您抽中了：《世界观(英文版)》\n“喵！好厉害”（本猫对你的崇拜度+0.6，同情度-0.3）" },
 	{"strGetBook2","恭喜您抽中了：《牧猫人手册(英文版)》\n“喵！好厉害”（本猫对你的崇拜度+0.4，同情度-0.2）" },
 	{"strGetBook3","恭喜您抽中了：《猫之书(英文版)》\n“运气不错嘛!”（本猫对你的崇拜度+0.2，同情度-0.1）" },
@@ -123,7 +122,7 @@ std::map<std::string, std::string> GlobalMsg
 	{"strJrrpErr", "JRRP获取失败! 错误信息: \n{0}"},
 	{"strGetBookCatInfo", "【喵苏鲁图书抽取 - 抽中概率】\n《基础规则》         -30%\n《猫之书(英文版)》      - 10 % \n《牧猫人手册(英文版)》 - 2 % \n《世界观(英文版)》   - 0.4%\n《血光将至log》by杏子 - 0.2%\n《猫之书(中文版)》   - 0.05% \n《牧猫人手册(中文版)》 - 0.01 % \n《世界观(中文版)》    - 0.003 % \n"},
 	{"strHlpMsg" , Dice_Short_Ver + "\n" +
-	R"((本骰子为暂为测试版本。目录为：【扩展指令·喵苏鲁】、【扩展指令·log记录】、【测试版说明】、【扩展指令解惑】、【通用指令】)
+	R"((本骰子暂为测试版本。目录为：【扩展指令·喵苏鲁】、【扩展指令·log记录】、【测试版说明】、【扩展指令解惑】、【通用指令】)
 【扩展指令·喵苏鲁】
 .cat [个数]              喵苏鲁猫咪做成
 .getcard human     获取人物卡模板

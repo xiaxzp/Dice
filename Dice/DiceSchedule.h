@@ -14,8 +14,9 @@
 using std::string;
 using std::map;
 using std::unordered_map;
+using std::shared_ptr;
 
-struct DiceJobDetail {
+struct DiceJobDetail : public std::enable_shared_from_this<DiceJobDetail> {
     long long fromQQ = 0;
     chatType fromChat;
     string cmd_key;
@@ -28,7 +29,7 @@ struct DiceJobDetail {
     DiceJobDetail(long long qq, chatType ct, std::string msg = "", const char* cmd = "") 
         :fromQQ(qq), fromChat(ct), strMsg(msg),cmd_key(cmd) {
     }
-    virtual void reply(string, bool = true) {}
+    virtual void reply(const string&, bool = true) {}
     string& operator[](const char* key){
         return strVar[key];
     }
@@ -79,10 +80,12 @@ public:
     }
     void load();
     void save();
+    void set(long long qq, const string& key, int cnt) { cntUser[qq][key] = cnt; save(); }
     void inc(const string& key) { cntGlobal[key]++; save(); }
     void inc(long long qq, const string& key, int cnt = 1) { cntUser[qq][key] += cnt; save(); }
     int& get(const string& key) { return cntGlobal[key]; }
     int& get(long long qq, const string& key) { return cntUser[qq][key]; }
+    int getJrrp(long long qq);
     size_t cnt(const string& key = "") { return cntUser.size(); }
     void daily_clear();
 };

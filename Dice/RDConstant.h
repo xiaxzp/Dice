@@ -25,6 +25,7 @@
 #define DICE_RD_CONSTANT
 #include <string>
 #include <set>
+#include <map>
 
 //Error Handle
 #define Value_Err (-1)
@@ -142,6 +143,7 @@ static std::map<std::string, std::string> mVariableCOC7 = {
 	{"取悦", "&魅惑"},
 };
 static std::map<std::string, std::string> ExpressionCOC7 = {
+	{"__DefaultDiceExp", "1D100"},
 	{"医学回复", "1D3"},
 	{"精神分析回复", "1D3"},
 	{"徒手伤害", "1D3+[DB]"},
@@ -270,6 +272,7 @@ static std::map<std::string, std::string> AutoFillCOC7 = {
 	{"闪避", "[敏捷]/2"}
 };
 static std::map<std::string, short> SkillDefaultVal = {
+	{"__DefaultDice", 100},
 	{"会计", 5},
 	{"人类学", 1},
 	{"估价", 5},

@@ -1,8 +1,10 @@
+#pragma once
+
 /*
  * 玩家人物卡
- * Copyright (C) 2019 String.Empty
+ * Copyright (C) 2019-2021 String.Empty
  */
-#pragma once
+
 #include <fstream>
 #include <string>
 #include <utility>
@@ -13,6 +15,7 @@
 #include <mutex>
 #include "CQTools.h"
 #include "Unpack.h"
+#include "RDConstant.h"
 #include "RD.h"
 #include "DiceXMLTree.h"
 #include "DiceFile.hpp"
@@ -115,25 +118,15 @@ public:
 
 	CardTemp(string type, map<string, string> replace, vector<vector<string>> basic, set<string> info,
 	         map<string, string> autofill, map<string, string> dynamic, map<string, string> exp,
-	         map<string, short> skill, map<string, CardBuild> option) : type(
-		                                                                    std::move(
-			                                                                    type)), replaceName(
-		                                                                    std::move(
-			                                                                    replace)), vBasicList(
-		                                                                    std::move(
-			                                                                    basic)), sInfoList(
-		                                                                    std::move(
-			                                                                    info)), mAutoFill(
-		                                                                    std::move(
-			                                                                    autofill)), mVariable(
-		                                                                    std::move(
-			                                                                    dynamic)), mExpression(
-		                                                                    std::move(
-			                                                                    exp)), defaultSkill(
-		                                                                    std::move(
-			                                                                    skill)), mBuildOption(
-		                                                                    std::move(
-			                                                                    option))
+	         map<string, short> skill, map<string, CardBuild> option) : type(std::move(type)), 
+			                                                            replaceName(std::move(replace)), 
+		                                                                vBasicList(std::move(basic)), 
+		                                                                sInfoList(std::move(info)), 
+		                                                                mAutoFill(std::move(autofill)), 
+		                                                                mVariable(std::move(dynamic)), 
+		                                                                mExpression(std::move(exp)), 
+		                                                                defaultSkill(std::move(skill)), 
+		                                                                mBuildOption(std::move(option))
 	{
 	}
 
@@ -205,49 +198,8 @@ public:
 	string show();
 };
 
-inline map<string, CardTemp> mCardTemplet = {
-		{
-			"COC7", {
-				"COC7", SkillNameReplace, BasicCOC7, InfoCOC7, AutoFillCOC7, mVariableCOC7, ExpressionCOC7,
-				SkillDefaultVal, {
-					{"_default", CardBuild({BuildCOC7}, CardDeck::mPublicDeck["随机姓名"], {})},
-					{
-						"bg", CardBuild({
-											{"性别", "{性别}"}, {"年龄", "7D6+8"}, {"职业", "{调查员职业}"}, {"个人描述", "{个人描述}"},
-											{"重要之人", "{重要之人}"}, {"思想信念", "{思想信念}"}, {"意义非凡之地", "{意义非凡之地}"},
-											{"宝贵之物", "{宝贵之物}"}, {"特质", "{调查员特点}"}
-										}, CardDeck::mPublicDeck["随机姓名"], {})
-					}
-				}
-			}
-		},
-		{"BRP", {
-				"BRP", {}, {}, {}, {}, {}, {}, {
-					{"__DefaultDice",100}
-				}, {
-					{"_default", CardBuild({}, CardDeck::mPublicDeck["随机姓名"], {})},
-					{
-						"bg", CardBuild({
-											{"性别", "{性别}"}, {"年龄", "7D6+8"}, {"职业", "{调查员职业}"}, {"个人描述", "{个人描述}"},
-											{"重要之人", "{重要之人}"}, {"思想信念", "{思想信念}"}, {"意义非凡之地", "{意义非凡之地}"},
-											{"宝贵之物", "{宝贵之物}"}, {"特质", "{调查员特点}"}
-										}, CardDeck::mPublicDeck["随机姓名"], {})
-					}
-				}
-		}},
-		{"DND", {
-				"DND", {}, {}, {}, {}, {}, {}, {
-					{"__DefaultDice",20}
-				}, {
-					{"_default", CardBuild({}, CardDeck::mPublicDeck["随机姓名"], {})},
-					{
-						"bg", CardBuild({
-											{"性别", "{性别}"}, 
-										}, CardDeck::mPublicDeck["随机姓名"], {})
-					}
-				}
-		}},
-};
+// 由于依赖于其他全局变量，为了避免全局变量初始化顺序冲突，这个变量会在eventEnable中被初始化
+inline map<string, CardTemp> mCardTemplet;
 CardTemp& getCardTemplet(const string& type);
 
 struct lua_State;
@@ -397,7 +349,7 @@ public:
 	{
 		std::stack<string> vOption;
 		int Cnt;
-		vOption.push("");
+		vOption.push("_default");
 		while ((Cnt = para.rfind(':')) != string::npos)
 		{
 			vOption.push(para.substr(Cnt + 1));
@@ -685,16 +637,7 @@ public:
 		return 0;
 	}
 
-	int renameCard(const string& name, const string& name_new)
-	{
-		std::lock_guard<std::mutex> lock_queue(cardMutex);
-		if (mNameIndex.count(name_new))return -4;
-		if (name_new.find(":") != string::npos)return -6;
-		const int i = mNameIndex[name_new] = mNameIndex[name];
-		mNameIndex.erase(name);
-		mCardList[i].setName(name_new);
-		return 0;
-	}
+	int renameCard(const string& name, const string& name_new);
 
 	int copyCard(const string& name1, const string& name2, long long group = 0)
 	{
@@ -811,7 +754,7 @@ public:
 		fout << base64_encode(pack.getAll());
 	}
 
-	void writeb(std::ofstream& fout)
+	void writeb(std::ofstream& fout) const
 	{
 		fwrite(fout, indexMax);
 		fwrite(fout, mCardList);

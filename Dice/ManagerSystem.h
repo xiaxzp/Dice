@@ -1,9 +1,11 @@
+#pragma once
+
 /*
  * 后台系统
  * Copyright (C) 2019-2020 String.Empty
  * 控制清理用户/群聊记录，清理图片，监控系统
  */
-#pragma once
+
 #include <set>
 #include <map>
 #include <utility>
@@ -13,6 +15,12 @@
 #include "DiceFile.hpp"
 #include "DiceConsole.h"
 #include "MsgFormat.h"
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#endif
+
 using std::string;
 using std::to_string;
 using std::set;
@@ -93,6 +101,7 @@ public:
 
 	void setConf(const string& key, int val)
 	{
+		if (key.empty())return;
 		std::lock_guard<std::mutex> lock_queue(ex_user);
 		intConf[key] = val;
 	}
@@ -167,6 +176,7 @@ extern unordered_map<long long, User> UserList;
 User& getUser(long long qq);
 short trustedQQ(long long qq);
 int clearUser();
+int clearGroup();
 
 string getName(long long QQ, long long GroupID = 0);
 void filter_CQcode(string&, long long fromGroup = 0);
@@ -379,6 +389,7 @@ void scanImage(const map<TKey, TVal>& m, unordered_set<string>& list)
 	}
 }
 
+#ifdef _WIN32
 DWORD getRamPort();
 
 /*static DWORD getRamPort() {
@@ -398,3 +409,4 @@ long long getWinCpuUsage();
 long long getProcessCpu();
 
 long long getDiskUsage(double&, double&);
+#endif

@@ -1,3 +1,26 @@
+/*
+ *  _______     ________    ________    ________    __
+ * |   __  \   |__    __|  |   _____|  |   _____|  |  |
+ * |  |  |  |     |  |     |  |        |  |_____   |  |
+ * |  |  |  |     |  |     |  |        |   _____|  |__|
+ * |  |__|  |   __|  |__   |  |_____   |  |_____    __
+ * |_______/   |________|  |________|  |________|  |__|
+ *
+ * Dice! QQ Dice Robot for TRPG
+ * Copyright (C) 2018-2021 w4123溯洄
+ * Copyright (C) 2019-2021 String.Empty
+ *
+ * This program is free software: you can redistribute it and/or modify it under the terms
+ * of the GNU Affero General Public License as published by the Free Software Foundation,
+ * either version 3 of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License along with this
+ * program. If not, see <http://www.gnu.org/licenses/>.
+ */
 #include <set>
 #include "DiceMod.h"
 #include "GlobalVar.h"
@@ -6,6 +29,7 @@
 #include "DiceFile.hpp"
 #include "DiceEvent.h"
 #include "DiceLua.h"
+#include "RandomGenerator.h"
 using std::set;
 
 bool DiceMsgOrder::exec(FromMsg* msg) {
@@ -17,12 +41,21 @@ bool DiceMsgOrder::exec(FromMsg* msg) {
 	}
 	return false;
 }
+bool DiceMsgOrder::exec() {
+	if (type == OrderType::Lua) {
+		std::thread th(lua_call_task, fileLua.c_str(), funcLua.c_str());
+		th.detach();
+		//lua_call_task(fileLua.c_str(), funcLua.c_str());
+		return true;
+	}
+	return false;
+}
 
 DiceModManager::DiceModManager() : helpdoc(HelpDoc)
 {
 }
 
-string DiceModManager::format(string s, const map<string, string, less_ci>& dict, const char* mod_name = "") const
+string DiceModManager::format(string s, const map<string, string, less_ci>& dict, const char* mod_name) const
 {
 	//直接重定向
 	if (s[0] == '&')
@@ -45,10 +78,23 @@ string DiceModManager::format(string s, const map<string, string, less_ci>& dict
 			continue;
 		}
 		string key = s.substr(l + 1, r - l - 1), val;
-		auto it = dict.find(key);
-		if (it != dict.end())
-		{
+		if (key.find("help:") == 0) {
+			key = key.substr(5);
+			val = fmt->format(fmt->get_help(key), dict);
+		}
+		else if (key.find("sample:") == 0) {
+			key = key.substr(7);
+			vector<string> samples{ split(key,"|") };
+			if (samples.empty())val = "";
+			else
+				val = fmt->format(samples[RandomGenerator::Randint(0, samples.size() - 1)], dict);
+		}
+		else if (auto it = dict.find(key); it != dict.end()){
 			val = format(it->second, dict, mod_name);
+		}
+		//局部屏蔽全局
+		else if ((it = GlobalChar.find(key)) != GlobalChar.end()) {
+			val = it->second;
 		}
 		else if (auto func = strFuncs.find(key); func != strFuncs.end())
 		{
@@ -117,7 +163,7 @@ void DiceModManager::_help(const shared_ptr<DiceJobDetail>& job) {
 	}
 	else job->reply("{strHelpNotFound}");
 	cntHelp[(*job)["help_word"]] += 1;
-	saveJMap(DiceDir + "\\user\\HelpStatic.json",cntHelp);
+	saveJMap(DiceDir / "user" / "HelpStatic.json",cntHelp);
 }
 
 void DiceModManager::set_help(const string& key, const string& val)
@@ -140,8 +186,12 @@ bool DiceModManager::listen_order(DiceJobDetail* msg) {
 	msgorder[nameOrder].exec((FromMsg*)msg);
 	return true;
 }
-string DiceModManager::list_order() { 
-	return "扩展指令:" + listKey(msgorder);
+string DiceModManager::list_order() {
+	return msgorder.empty() ? "" : "扩展指令:" + listKey(msgorder);
+}
+
+bool DiceModManager::call_task(const string& task) {
+	return taskcall[task].exec();
 }
 
 int DiceModManager::load(ResList* resLog) 
@@ -149,7 +199,7 @@ int DiceModManager::load(ResList* resLog)
 	vector<std::filesystem::path> sModFile;
 	//读取mod
 	vector<string> sModErr;
-	int cntFile = listDir(DiceDir + "\\mod\\", sModFile);
+	int cntFile = listDir(DiceDir / "mod" , sModFile);
 	int cntItem{0};
 	if (cntFile > 0) {
 		for (auto& pathFile : sModFile) {
@@ -171,7 +221,7 @@ int DiceModManager::load(ResList* resLog)
 				cntItem += readJMap(j["global_char"], GlobalChar);
 			}
 		}
-		*resLog << "读取\\mod\\中的" + std::to_string(cntFile) + "个文件, 共" + std::to_string(cntItem) + "个条目";
+		*resLog << "读取/mod/中的" + std::to_string(cntFile) + "个文件, 共" + std::to_string(cntItem) + "个条目";
 		if (!sModErr.empty()) {
 			*resLog << "读取失败" + std::to_string(sModErr.size()) + "个:";
 			for (auto& it : sModErr) {
@@ -181,7 +231,7 @@ int DiceModManager::load(ResList* resLog)
 	}
 	//读取plugin
 	vector<std::filesystem::path> sLuaFile;
-	int cntLuaFile = listDir(DiceDir + "\\plugin\\", sLuaFile);
+	int cntLuaFile = listDir(DiceDir / "plugin", sLuaFile);
 	int cntOrder{ 0 };
 	if (cntLuaFile <= 0)return cntLuaFile;
 	vector<string> sLuaErr; 
@@ -196,15 +246,27 @@ int DiceModManager::load(ResList* resLog)
 		int cnt = lua_readStringTable(fileLua.c_str(), "msg_order", mOrder);
 		if (cnt > 0) {
 			for (auto& [key, func] : mOrder) {
-				msgorder[key] = { fileLua,func };
+				msgorder[::format(key, GlobalMsg)] = { fileLua,func };
 			}
 			cntOrder += mOrder.size();
 		}
 		else if (cnt < 0) {
 			sLuaErr.push_back(pathFile.filename().string());
 		}
+		std::unordered_map<std::string, std::string> mJob;
+		cnt = lua_readStringTable(fileLua.c_str(), "task_call", mJob);
+		if (cnt > 0) {
+			for (auto& [key, func] : mJob) {
+				taskcall[key] = { fileLua,func };
+			}
+			cntOrder += mJob.size();
+		}
+		else if (cnt < 0
+				 && *sLuaErr.rbegin() != pathFile.filename().string()) {
+			sLuaErr.push_back(pathFile.filename().string());
+		}
 	}
-	*resLog << "读取\\plugin\\中的" + std::to_string(cntLuaFile) + "个脚本, 共" + std::to_string(cntOrder) + "个指令";
+	*resLog << "读取/plugin/中的" + std::to_string(cntLuaFile) + "个脚本, 共" + std::to_string(cntOrder) + "个指令";
 	if (!sLuaErr.empty()) {
 		*resLog << "读取失败" + std::to_string(sLuaErr.size()) + "个:";
 		for (auto& it : sLuaErr) {
@@ -215,7 +277,7 @@ int DiceModManager::load(ResList* resLog)
 	factory.detach();
 	if (cntHelp.empty()) {
 		cntHelp.reserve(helpdoc.size());
-		loadJMap(DiceDir + "\\user\\HelpStatic.json", cntHelp);
+		loadJMap(DiceDir / "user" / "HelpStatic.json", cntHelp);
 	}
 	return cntFile;
 }
@@ -231,4 +293,5 @@ void DiceModManager::clear()
 {
 	helpdoc.clear();
 	msgorder.clear();
+	taskcall.clear();
 }

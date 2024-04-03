@@ -1,9 +1,11 @@
+#pragma once
+
 /*
  * Copyright (C) 2019-2020 String.Empty
  * 处理定时事件
  * 处理不能即时完成的指令
  */
-#pragma once
+
 #include <string>
 #include <map>
 #include <unordered_map>
@@ -71,11 +73,11 @@ typedef void (*cmd)(DiceJob&);
 //今日记录
 class DiceToday {
     tm stToday;
-    string pathFile;
+    std::filesystem::path pathFile;
     unordered_map<string, int>cntGlobal;
     unordered_map<long long, unordered_map<string, int>>cntUser;
 public:
-    DiceToday(const string& path) :pathFile(path) {
+    DiceToday(const std::filesystem::path& path) :pathFile(path) {
         load();
     }
     void load();

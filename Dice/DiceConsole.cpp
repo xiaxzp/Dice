@@ -7,8 +7,8 @@
  * |_______/  |________| |________| |________| |__|
  *
  * Dice! QQ Dice Robot for TRPG
- * Copyright (C) 2018-2020 w4123溯洄
- * Copyright (C) 2019-2020 String.Empty
+ * Copyright (C) 2018-2021 w4123溯洄
+ * Copyright (C) 2019-2021 String.Empty
  *
  * This program is free software: you can redistribute it and/or modify it under the terms
  * of the GNU Affero General Public License as published by the Free Software Foundation,
@@ -33,6 +33,10 @@
 #include "Jsonio.h"
 #include "BlackListManager.h"
 #include "DiceSchedule.h"
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#endif	
 #include "DDAPI.h"
 
 using namespace std;
@@ -52,21 +56,22 @@ const std::map<std::string, int, less_ci>Console::intDefault{
 {"SendIntervalIdle",500},{"SendIntervalBusy",100},
 //自动保存事件间隔[min],自动图片清理间隔[h],自动重启框架间隔[h]
 {"AutoSaveInterval",5},{"AutoClearImage",0},{"AutoFrameRemake",0},
+//用户记录清理期限[Day],群记录清理期限[Day]
+{"InactiveUserLine",360},{"InactiveGroupLine",360},
 //接收群内自己的消息，接受自己私聊消息
 {"ListenGroupEcho",0},{"ListenSelfEcho",0},
 };
-const enumap<string> Console::mClockEvent{"off", "on", "save", "clear"};
+const enumap<string> Console::mClockEvent{ "off", "on", "save", "clear" };
 
-int Console::setClock(Clock c, ClockEvent e)
+int Console::setClock(Clock c, const string& e)
 {
 	if (c.first > 23 || c.second > 59)return -1;
-	if (static_cast<int>(e) > 3)return -2;
 	mWorkClock.emplace(c, e);
 	save();
 	return 0;
 }
 
-int Console::rmClock(Clock c, ClockEvent e)
+int Console::rmClock(Clock c, const string& e)
 {
 	if (const auto it = match(mWorkClock, c, e); it != mWorkClock.end())
 	{
@@ -82,23 +87,7 @@ ResList Console::listClock() const
 	ResList list;
 	for (const auto& [clock, eve] : mWorkClock)
 	{
-		string strClock = printClock(clock);
-		switch (eve)
-		{
-		case ClockEvent::on:
-			strClock += " 定时开启";
-			break;
-		case ClockEvent::off:
-			strClock += " 定时关闭";
-			break;
-		case ClockEvent::save:
-			strClock += " 定时保存";
-			break;
-		case ClockEvent::clear:
-			strClock += " 定时清群";
-			break;
-		default: break;
-		}
+		string strClock = printClock(clock) + " " + eve;
 		list << strClock;
 	}
 	return list;
@@ -146,7 +135,7 @@ void Console::rmNotice(chatType ct)
 
 int Console::log(const std::string& strMsg, int note_lv, const string& strTime)
 {
-	ofstream fout(string(DiceDir + "\\audit\\log") + to_string(DiceMaid) + "_" + printDate() + ".txt",
+	ofstream fout(DiceDir / "audit" / ("log" + to_string(DiceMaid) + "_" + printDate() + ".txt"),
 	              ios::out | ios::app);
 	fout << strTime << "\t" << note_lv << "\t" << printLine(strMsg) << std::endl;
 	fout.close();
@@ -158,7 +147,8 @@ int Console::log(const std::string& strMsg, int note_lv, const string& strTime)
 		{
 			if (!(level & note_lv))continue;
 			AddMsgToQueue(note, ct);
-			Cnt++;
+			Cnt++; 
+			if(strTime.empty())this_thread::sleep_for(chrono::milliseconds(console["SendIntervalIdle"]));
 		}
 		if (!Cnt)DD::sendPrivateMsg(DiceMaid, note);
 	}
@@ -182,18 +172,40 @@ void Console::reset()
 	NoticeList.clear();
 }
 
+bool Console::load() 	{
+	string s;
+	//DSens.build({ {"nn老公",2 } });
+	if (!rdbuf(fpPath, s))return false;
+	DDOM xml(s);
+	if (xml.count("mode"))isMasterMode = stoi(xml["mode"].strValue);
+	if (xml.count("master"))masterQQ = stoll(xml["master"].strValue);
+	if (xml.count("clock"))
+		for (auto& child : xml["clock"].vChild) {
+			mWorkClock.insert({
+				scanClock(child.strValue), child.tag
+							  });
+		}
+	if (xml.count("conf"))
+		for (auto& child : xml["conf"].vChild) 			{
+			std::pair<string, int> conf;
+			readini(child.strValue, conf);
+			if (intDefault.count(conf.first))intConf.insert(conf);
+		}
+	loadNotice();
+	return true;
+}
 void Console::loadNotice()
 {
-	if (loadFile(DiceDir + "\\conf\\NoticeList.txt", NoticeList) < 1)
+	if (loadFile(DiceDir / "conf" / "NoticeList.txt", NoticeList) < 1)
 	{
 		std::set<chatType> sChat;
-		if (loadFile(DiceDir + "com.w4123.dice\\MonitorList.RDconf", sChat) > 0)
+		if (loadFile(DiceDir / "com.w4123.dice" / "MonitorList.RDconf", sChat) > 0)
 			for (const auto& it : sChat)
 			{
 				console.setNotice(it, 0b100000);
 			}
 		sChat.clear();
-		if (loadFile(DiceDir + "\\conf\\RecorderList.RDconf", sChat) > 0)
+		if (loadFile(DiceDir / "conf" / "RecorderList.RDconf", sChat) > 0)
 			for (const auto& it : sChat)
 			{
 				console.setNotice(it, 0b11011);
@@ -213,7 +225,7 @@ void Console::loadNotice()
 
 void Console::saveNotice() const
 {
-	saveFile(DiceDir + "\\conf\\NoticeList.txt", NoticeList);
+	saveFile(DiceDir / "conf" / "NoticeList.txt", NoticeList);
 }
 
 Console console;
@@ -228,25 +240,36 @@ std::map<long long, long long> mDiceList;
 long long llStartTime = time(nullptr);
 
 //当前时间
-SYSTEMTIME stNow{};
-SYSTEMTIME stTmp{};
+tm stNow{};
 
 std::string printSTNow()
 {
-	GetLocalTime(&stNow);
+	time_t tt = time(nullptr);
+#ifdef _MSC_VER
+	localtime_s(&stNow, &tt);
+#else
+	localtime_r(&tt, &stNow);
+#endif
 	return printSTime(stNow);
 }
 
 std::string printDate()
 {
-	return to_string(stNow.wYear) + "-" + (stNow.wMonth < 10 ? "0" : "") + to_string(stNow.wMonth) + "-" + (
-		stNow.wDay < 10 ? "0" : "") + to_string(stNow.wDay);
+	return to_string(stNow.tm_year + 1900) + "-" + (stNow.tm_mon + 1 < 10 ? "0" : "") + to_string(stNow.tm_mon + 1) + "-" + (
+		stNow.tm_mday < 10 ? "0" : "") + to_string(stNow.tm_mday);
 }
 
 std::string printDate(time_t tt)
 {
 	tm t{};
-	if (!tt || localtime_s(&t, &tt))return R"(????-??-??)";
+	if(!tt) return R"(????-??-??)"; 
+#ifdef _MSC_VER
+	auto ret = localtime_s(&t, &tt);
+	if(ret) return R"(????-??-??)";
+#else
+	auto ret = localtime_r(&tt, &t);
+	if(!ret) return R"(????-??-??)";
+#endif
 	return to_string(t.tm_year + 1900) + "-" + to_string(t.tm_mon + 1) + "-" + to_string(t.tm_mday);
 }
 
@@ -264,13 +287,13 @@ string printClock(std::pair<int, int> clock)
 	return strClock;
 }
 
-std::string printSTime(const SYSTEMTIME st)
+std::string printSTime(const tm st)
 {
-	return to_string(st.wYear) + "-" + (st.wMonth < 10 ? "0" : "") + to_string(st.wMonth) + "-" + (
-			st.wDay < 10 ? "0" : "") + to_string(st.wDay) + " " + (st.wHour < 10 ? "0" : "") + to_string(st.wHour) + ":"
+	return to_string(st.tm_year + 1900) + "-" + (st.tm_mon + 1 < 10 ? "0" : "") + to_string(st.tm_mon + 1) + "-" + (
+			st.tm_mday < 10 ? "0" : "") + to_string(st.tm_mday) + " " + (st.tm_hour < 10 ? "0" : "") + to_string(st.tm_hour) + ":"
 		+ (
-			st.wMinute < 10 ? "0" : "") + to_string(st.wMinute) + ":" + (st.wSecond < 10 ? "0" : "") +
-		to_string(st.wSecond);
+			st.tm_min < 10 ? "0" : "") + to_string(st.tm_min) + ":" + (st.tm_sec < 10 ? "0" : "") +
+		to_string(st.tm_sec);
 }
 	//打印用户昵称QQ
 	string printQQ(long long llqq)
@@ -315,63 +338,15 @@ void getExceptGroup() {
 }
 
 
-bool operator==(const SYSTEMTIME& st, const Console::Clock clock)
+bool operator==(const tm& st, const Console::Clock clock)
 {
-	return st.wHour == clock.first && st.wHour == clock.second;
+	return st.tm_hour == clock.first && st.tm_hour == clock.second;
 }
 
-bool operator<(const Console::Clock clock, const SYSTEMTIME& st)
+bool operator<(const Console::Clock clock, const tm& st)
 {
-	return st.wHour == clock.first && st.wHour == clock.second;
+	return st.tm_hour == clock.first && st.tm_hour == clock.second;
 }
-
-//简易计时器
-	void ConsoleTimer()
-	{
-		Console::Clock clockNow{stNow.wHour,stNow.wMinute};
-		while (Enabled) 
-		{
-			GetLocalTime(&stNow);
-			//分钟时点变动
-			if (stTmp.wMinute != stNow.wMinute)
-			{
-				stTmp = stNow;
-				clockNow = {stNow.wHour, stNow.wMinute};
-				for (const auto& [clock,eve_type] : multi_range(console.mWorkClock, clockNow))
-				{
-					switch (eve_type)
-					{
-					case ClockEvent::on:
-						if (console["DisabledGlobal"])
-						{
-							console.set("DisabledGlobal", 0);
-							console.log(getMsg("strClockToWork"), 0b10000, "");
-						}
-						break;
-					case ClockEvent::off:
-						if (!console["DisabledGlobal"])
-						{
-							console.set("DisabledGlobal", 1);
-							console.log(getMsg("strClockOffWork"), 0b10000, "");
-						}
-						break;
-					case ClockEvent::save:
-						dataBackUp();
-						console.log(GlobalMsg["strSelfName"] + "定时保存完成√", 1, printSTime(stTmp));
-						break;
-					case ClockEvent::clear:
-						sch.push_job("clrgroup", true, {
-							{"clear_mode","black"}
-									 });
-						break;
-					default: break;
-					}
-				}
-			}
-			this_thread::sleep_for(100ms);
-		}
-	}
-
 
 	void ThreadFactory::exit() {
 		rear = 0;

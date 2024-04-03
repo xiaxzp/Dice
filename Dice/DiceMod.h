@@ -1,8 +1,10 @@
+#pragma once
+
 /*
  * ×ÊÔ´Ä£¿é
  * Copyright (C) 2019-2020 String.Empty
  */
-#pragma once
+
 #include <string>
 #include <utility>
 #include <vector>
@@ -47,6 +49,7 @@ public:
         type = OrderType::Lua;
     }
     bool exec(FromMsg*);
+    bool exec();
 };
 
 class DiceMod
@@ -90,13 +93,14 @@ class DiceModManager
 	map<string, DiceMod> mNameIndex;
 	map<string, string, less_ci> helpdoc;
     map<string, DiceMsgOrder, less_ci> msgorder;
+    map<string, DiceMsgOrder, less_ci> taskcall;
     WordQuerier querier;
     TrieG<less_ci> gOrder;
 public:
 	DiceModManager();
 	friend void loadData();
     bool isIniting{ false };
-	string format(string, const map<string, string, less_ci>&, const char*) const;
+	string format(string, const map<string, string, less_ci>&, const char* mod_name = "") const;
     unordered_map<string, size_t>cntHelp;
 	[[nodiscard]] string get_help(const string&) const;
     void _help(const shared_ptr<DiceJobDetail>&);
@@ -104,6 +108,7 @@ public:
 	void rm_help(const string&);
 
     bool listen_order(DiceJobDetail*);
+    bool call_task(const string&);
     string list_order();
 	int load(ResList*);
     void init();

@@ -1,4 +1,6 @@
 #include <mutex>
+#include <ctime>
+#include <condition_variable>
 #include <deque>
 #include "DDAPI.h"
 #include "GlobalVar.h"
@@ -7,8 +9,10 @@
 #include "Jsonio.h"
 #include "DiceSchedule.h"
 #include "DiceNetwork.h"
+#include "DiceMod.h"
 #include "RandomGenerator.h"
 #include <condition_variable>
+#include <chrono>
 
 unordered_map<string, cmd> mCommand = {
 	{"syscheck",check_system},
@@ -53,7 +57,7 @@ void DiceJob::reply(const std::string& msg) {
 	AddMsgToQueue(format(msg, GlobalMsg, strVar), fromChat);
 }
 void DiceJob::note(const std::string& strMsg, int note_lv = 0b1) {
-	ofstream fout(DiceDir + "/audit/log" + to_string(console.DiceMaid) + "_" + printDate() + ".txt", ios::out | ios::app);
+	ofstream fout(DiceDir / "audit" / ("log" + to_string(console.DiceMaid) + "_" + printDate() + ".txt"), ios::out | ios::app);
 	fout << printSTNow() << "\t" << note_lv << "\t" << printLine(strMsg) << std::endl;
 	fout.close();
 	echo(strMsg);
@@ -156,11 +160,13 @@ void DiceScheduler::start() {
 	threads(jobHandle);
 	threads(jobWait);
 	push_job("heartbeat");
-	push_job("syscheck");
+	add_job_for(60, "syscheck");
 	if (console["AutoSaveInterval"] > 0)add_job_for(console["AutoSaveInterval"] * 60, "autosave");
 	if (console["AutoFrameRemake"] > 0)
 		add_job_for(console["AutoFrameRemake"] * 60 * 60, "remake");
 	else add_job_for(60 * 60, "remake");
+	if (console["CloudBlackShare"] > 0)
+		add_job_for(12 * 60 * 60, "cloudblack");
 }
 void DiceScheduler::end() {
 }
@@ -174,19 +180,25 @@ int DiceToday::getJrrp(long long qq) {
 		return cntUser[qq]["jrrp"] = stoi(res);
 	}
 	else {
-		if (!cntUser[qq].count("jrrp_local"))
+		if (!cntUser[qq].count("jrrp_local")) {
 			cntUser[qq]["jrrp_local"] = RandomGenerator::Randint(1, 100);
-		console.log(getMsg("strJrrpErr",
-						   { {"res", res} }
-		), 1);
+			console.log(getMsg("strJrrpErr",
+							   { {"res", res} }
+			), 1);
+		}
 		return cntUser[qq]["jrrp_local"];
 	}
 }
 
 void DiceToday::daily_clear() {
-	GetLocalTime(&stNow);
-	if (stToday.tm_mday != stNow.wDay) {
-		stToday.tm_mday = stNow.wDay;
+	time_t tt = time(nullptr);
+#ifdef _MSC_VER
+	localtime_s(&stNow, &tt);
+#else
+	localtime_r(&tt, &stNow);
+#endif
+	if (stToday.tm_mday != stNow.tm_mday) {
+		stToday.tm_mday = stNow.tm_mday;
 		cntGlobal.clear();
 		cntUser.clear();
 	}
@@ -207,7 +219,11 @@ void DiceToday::load() {
 	json jFile = freadJson(pathFile);
 	if (jFile.is_null()) {
 		time_t tt = time(nullptr);
+#ifdef _MSC_VER
 		localtime_s(&stToday, &tt);
+#else
+		localtime_r(&tt, &stToday);
+#endif
 		return;
 	}
 	if (jFile.count("date")) {
@@ -230,7 +246,68 @@ void DiceToday::load() {
 string printTTime(time_t tt) {
 	char tm_buffer[20];
 	tm t{};
-	if (!tt || localtime_s(&t, &tt))return "1970-00-00 00:00:00"; 
+	if(!tt) return "1970-00-00 00:00:00"; 
+#ifdef _MSC_VER
+	auto ret = localtime_s(&t, &tt);
+	if(ret) return "1970-00-00 00:00:00";
+#else
+	auto ret = localtime_r(&tt, &t);
+	if(!ret) return "1970-00-00 00:00:00";
+#endif
 	strftime(tm_buffer, 20, "%Y-%m-%d %H:%M:%S", &t);
 	return tm_buffer;
+}
+
+//简易计时器
+tm stTmp{};
+void ConsoleTimer() 	{
+	Console::Clock clockNow{ stNow.tm_hour,stNow.tm_min };
+	while (Enabled) 		{
+		time_t tt = time(nullptr);
+#ifdef _MSC_VER
+		localtime_s(&stNow, &tt);
+#else
+		localtime_r(&tt, &stNow);
+#endif
+		//分钟时点变动
+		if (stTmp.tm_min != stNow.tm_min) 			{
+			stTmp = stNow;
+			clockNow = { stNow.tm_hour, stNow.tm_min };
+			for (const auto& [clock, eve_type] : multi_range(console.mWorkClock, clockNow)){
+				switch (Console::mClockEvent[eve_type]) 					{
+				case 1:
+					if (console["DisabledGlobal"]) 						{
+						console.set("DisabledGlobal", 0);
+						console.log(getMsg("strClockToWork"), 0b10000, "");
+					}
+					break;
+				case 0:
+					if (!console["DisabledGlobal"]) 						{
+						console.set("DisabledGlobal", 1);
+						console.log(getMsg("strClockOffWork"), 0b10000, "");
+					}
+					break;
+				case 2:
+					dataBackUp();
+					console.log(GlobalMsg["strSelfName"] + "定时保存完成√", 1, printSTime(stTmp));
+					break;
+				case 3:
+					sch.push_job("clrgroup", true, {
+						{"clear_mode","black"}
+								 });
+					if (int cnt{ clearGroup() }) {
+						console.log("已清理过期群记录" + to_string(cnt) + "条", 1, printSTime(stTmp));
+					}
+					if (int cnt{ clearUser() }) {
+						console.log("已清理无效或过期用户记录" + to_string(cnt) + "条", 1, printSTime(stTmp));
+					}
+					break;
+				default:
+					fmt->call_task(eve_type);
+					break;
+				}
+			}
+		}
+		std::this_thread::sleep_for(100ms);
+	}
 }

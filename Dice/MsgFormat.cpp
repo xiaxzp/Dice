@@ -24,13 +24,16 @@
 #include <string>
 #include <fstream>//
 #include "DiceJob.h"
+#include "DiceMod.h"
 #include "EncodingConvert.h"
 #include "StrExtern.hpp"
 #include "CardDeck.h"
+#include "RandomGenerator.h"
 using std::string;
 
-std::map<string, string> GlobalChar{
+std::map<string, string> GlobalChar{ 
 	{"FormFeed","\f"},
+	{"Vertical","|"},
 	{"LBrace","{"},
 	{"RBrace","}"},
 	{"LBracket","["},
@@ -62,7 +65,57 @@ std::string format(std::string str, const std::initializer_list<const std::strin
 	}
 	return str;
 }
-
+std::string format(std::string s, const std::map<std::string, std::string, less_ci>& replace_str,
+				   const std::unordered_map<std::string, std::string>& str_tmp) {
+	if (s[0] == '&') 	{
+		string key = s.substr(1);
+		auto it = replace_str.find(key);
+		if (it != replace_str.end()) 		{
+			return format(it->second, replace_str, str_tmp);
+		}
+		if (auto uit = str_tmp.find(key); uit != str_tmp.end()) 		{
+			return uit->second;
+		}
+	}
+	int l = 0, r = 0;
+	while ((l = s.find('{', r)) != string::npos && (r = s.find('}', l)) != string::npos) {
+		//左括号前加‘\’表示该括号内容不转义
+		if (l - 1 >= 0 && s[l - 1] == 0x5c) {
+			s.replace(l - 1, 1, "");
+			continue;
+		}
+		string key = s.substr(l + 1, r - l - 1);
+		string val;
+		if (key.find("help:") == 0) {
+			key = key.substr(5);
+			val = fmt->format(fmt->get_help(key), replace_str);
+		}
+		else if (auto uit = str_tmp.find(key); uit != str_tmp.end()) {
+			if (key == "res")val = format(uit->second, replace_str, str_tmp);
+			else val = uit->second;
+		}
+		else if (key.find("sample:") == 0) {
+			key = key.substr(7);
+			vector<string> samples{ split(key,"|") };
+			if (samples.empty())val = "";
+			else
+				val = format(samples[RandomGenerator::Randint(0, samples.size() - 1)], replace_str, str_tmp);
+		}
+		else if (auto it = replace_str.find(key); it != replace_str.end()) 		{
+			val = format(it->second, replace_str, str_tmp);
+		}
+		else if ((it = GlobalChar.find(key)) != GlobalChar.end()) {
+			val = it->second;
+		}
+		else if (auto func = strFuncs.find(key); func != strFuncs.end()) 		{
+			val = func->second();
+		}
+		else continue;
+		s.replace(l, r - l + 1, val);
+		r = l + val.length();
+	}
+	return s;
+}
 string strip(std::string origin)
 {
 	while (true)
@@ -82,7 +135,7 @@ string strip(std::string origin)
 std::string to_binary(int b)
 {
 	ResList res;
-	for (int i = 0; i < 6; i++)
+	for (int i = 0; i < 14; i++)
 	{
 		if (b & (1 << i))res << std::to_string(i);
 	}

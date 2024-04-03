@@ -2,18 +2,23 @@
  * 后台系统
  * Copyright (C) 2019-2020 String.Empty
  */
-#include <windows.h>
-#include <xutility>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#endif
 #include <string_view>
+#include <filesystem>
 #include "ManagerSystem.h"
 
 #include "CardDeck.h"
+#include "CharacterCard.h"
 #include "GlobalVar.h"
 #include "DDAPI.h"
 #include "CQTools.h"
+#include "DiceSession.h"
 
-string dirExe;
-string DiceDir = "DiceData";
+std::filesystem::path dirExe;
+std::filesystem::path DiceDir("DiceData");
  //被引用的图片列表
 unordered_set<string> sReferencedImage;
 
@@ -50,21 +55,49 @@ short trustedQQ(long long qq)
 	else return UserList[qq].nTrust;
 }
 
-int clearUser()
-{
+
+int clearUser() {
 	vector<long long> QQDelete;
-	for (const auto& [qq, user] : UserList)
-	{
-		if (user.empty())
-		{
+	time_t tNow{ time(nullptr) };
+	time_t userline{ tNow - console["InactiveUserLine"] * (time_t)86400 };
+	bool isClearInactive{ console["InactiveUserLine"] > 0 };
+	for (const auto& [qq, user] : UserList) {
+		if (user.nTrust > 0)continue;
+		if (user.empty()) {
 			QQDelete.push_back(qq);
 		}
+		else if (isClearInactive) {
+			time_t tLast{ user.tUpdated };
+			if (gm->has_session(~qq) && gm->session(~qq).tUpdate > tLast)tLast = gm->session(~qq).tUpdate;
+			if (tLast >= userline)continue;
+			QQDelete.push_back(qq);
+			if (PList.count(qq)) {
+				PList.erase(qq);
+			}
+		}
 	}
-	for (const auto& qq : QQDelete)
-	{
+	for (const auto& qq : QQDelete) {
 		UserList.erase(qq);
+		if (gm->has_session(~qq))gm->session_end(~qq);
 	}
 	return QQDelete.size();
+}
+int clearGroup() {
+	if (console["InactiveGroupLine"] <= 0)return 0;
+	vector<long long> GrpDelete;
+	time_t tNow{ time(nullptr) };
+	time_t grpline{ tNow - console["InactiveGroupLine"] * (time_t)86400 };
+	for (const auto& [id, grp] : ChatList) {
+		if (grp.is_except() || grp.isset("免清") || grp.isset("忽略"))continue;
+		time_t tLast{ grp.tUpdated };
+		if (gm->has_session(id) && gm->session(id).tUpdate > grp.tUpdated)tLast = gm->session(id).tUpdate;
+		if (tLast < grpline)GrpDelete.push_back(id);
+	}
+	for (const auto& id : GrpDelete) {
+		ChatList.erase(id);
+	}
+	return GrpDelete.size();
+
 }
 
 string getName(long long QQ, long long GroupID)
@@ -152,7 +185,7 @@ void Chat::leave(const string& msg) {
 	if (!msg.empty()) {
 		if (isGroup)DD::sendGroupMsg(ID, msg);
 		else DD::sendDiscussMsg(ID, msg);
-		Sleep(500);
+		std::this_thread::sleep_for(500ms);
 	}
 	isGroup ? DD::setGroupLeave(ID) : DD::setDiscussLeave(ID);
 	set("已退");
@@ -193,6 +226,8 @@ void scanImage(const vector<string>& v, unordered_set<string>& list) {
 		scanImage(it, sReferencedImage);
 	}
 }
+
+#ifdef _WIN32
 
 DWORD getRamPort()
 {
@@ -284,3 +319,5 @@ long long getDiskUsage(double& mbFreeBytes, double& mbTotalBytes){
 	}
 	return 0;
 }
+
+#endif

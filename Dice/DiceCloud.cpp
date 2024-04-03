@@ -2,10 +2,8 @@
  * ÷»ÄïÍøÂç
  * Copyright (C) 2019 String.Empty
  */
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-#include <WinInet.h>
-#include <urlmon.h>
+#include <cstring>
+#include <filesystem>
 #include "json.hpp"
 #include "DiceCloud.h"
 #include "GlobalVar.h"
@@ -16,7 +14,14 @@
 #include "DiceEvent.h"
 #include "DDAPI.h"
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#include <WinInet.h>
+#include <urlmon.h>
+#include <io.h>
 #pragma comment(lib, "urlmon.lib")
+#endif
 
 using namespace std;
 using namespace nlohmann;
@@ -35,7 +40,11 @@ namespace Cloud
 	int checkWarning(const char* warning)
 	{
 		char* frmdata = new char[strlen(warning) + 1];
+#ifdef _MSC_VER
 		strcpy_s(frmdata, strlen(warning) + 1, warning);
+#else
+		strcpy(frmdata, warning);
+#endif
 		string temp;
 		Network::POST("shiki.stringempty.xyz", "/DiceCloud/warning_check.php", 80, frmdata, temp);
 		delete[] frmdata;
@@ -50,12 +59,29 @@ namespace Cloud
 		return 0;
 	}
 
-	int DownloadFile(const char* url, const char* downloadPath)
+	[[deprecated]] int DownloadFile(const char* url, const char* downloadPath)
 	{
+#ifdef _WIN32
 		DeleteUrlCacheEntryA(url);
 		if (URLDownloadToFileA(nullptr, url, downloadPath, 0, nullptr) != S_OK) return -1;
 		if (_access(downloadPath, 0))return -2;
 		return 0;
+#else
+		return -1;
+#endif
+	}
+	
+	int DownloadFile(const char* url, const std::filesystem::path& downloadPath)
+	{
+#ifdef _WIN32
+		DeleteUrlCacheEntryA(url);
+		if (URLDownloadToFileA(nullptr, url, downloadPath.string().c_str(), 0, nullptr) != S_OK) return -1;
+		std::error_code ec;
+		if (!std::filesystem::exists(downloadPath, ec) || ec)return -2;
+		return 0;
+#else
+		return -1;
+#endif
 	}
 
 	int checkUpdate(FromMsg* msg)

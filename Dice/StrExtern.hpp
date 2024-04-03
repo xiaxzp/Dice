@@ -5,17 +5,19 @@
  */
 
 #include <string>
+#include <vector>
 
 using std::string;
-using std::wstring;
+using std::u16string;
 using std::to_string;
+using std::vector;
 
 #define CP_GBK (936)
 
 string toString(int num, unsigned short size = 0);
 
 template<typename F>
-typename std::enable_if<std::is_floating_point<F>::value, string>::type 
+typename std::enable_if_t<std::is_floating_point_v<F>, string>
 toString(F num, unsigned short scale = 2, bool align = false) 
 {
     string strNum{ to_string(num) };
@@ -36,9 +38,11 @@ string to_signed_string(Dig num)
 
 int count_char(const string& s, char ch);
 
-string convert_w2a(const wchar_t* wch);
+vector<string> split(const string&, const string&);
 
-wstring convert_a2w(const char* ch);
+string convert_w2a(const char16_t* wch);
+
+u16string convert_a2w(const char* ch);
 
 string printDuringTime(long long);
 

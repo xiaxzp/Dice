@@ -38,6 +38,8 @@ Latest Release: [![GitHub release](https://img.shields.io/github/release-pre/Dic
 
 Python 模块还提供平台无关的指令总入口 `CommandRouter`，可通过参数传入 `.r`、`.rc`、`.coc`、`.st` 等完整指令，由 QQ 适配器负责把返回结果转换成消息。
 
+其中 `dice_core_py/maibot_plugin/` 提供 MaiBot 第三方插件适配器：监听 MaiBot 的 QQ 消息，命中 `.`、`/`、`。` 等前缀后调用 `CommandRouter` 并直接回复结果。安装和配置说明见 `dice_core_py/maibot_plugin/README.md`。
+
 ## Issue提交
 
 提交Issue前请务必确认没有其他人提交过相同的Issue, 善用搜索功能 提交Bug时最好附有截图以及问题复现方法, 同时也欢迎新功能建议

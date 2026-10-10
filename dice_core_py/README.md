@@ -23,6 +23,7 @@
 - [人物卡](#人物卡)
 - [DiceEngine 门面](#diceengine-门面)
 - [命令总入口](#命令总入口)
+- [MaiBot 适配器](#maibot-适配器)
 - [轮盘骰](#轮盘骰)
 - [牌堆](#牌堆)
 - [L5R 特殊骰](#l5r-特殊骰)
@@ -590,6 +591,23 @@ response = router.dispatch(request)
 
 这些边界命令和未知帮助词条建议均有 `tests/test_command_manual_coverage.py` 回归测试。当前核心仍不包含 QQ 权限、CQ 码、远程规则词库、日志上传或原项目 Lua/脚本扩展执行。
 
+## MaiBot 适配器
+
+`maibot_plugin/` 是可复制到 MaiBot `plugins/` 目录的第三方插件适配器。它监听
+`ON_MESSAGE_PRE_PROCESS`，将 MaiBot 的 QQ 群聊/私聊消息转换为 `MessageContext`，
+调用本模块的 `CommandRouter`，再用 `ctx.send.text()` 回复到原聊天流。命中前缀后会
+阻止消息继续进入 MaiBot 的普通对话链。
+
+安装独立核心并复制插件目录：
+
+```bash
+python -m pip install -e dice_core_py
+cp -R dice_core_py/maibot_plugin /path/to/MaiBot/plugins/
+```
+
+插件目录、配置、兼容说明和前缀列表见 `maibot_plugin/README.md`。默认支持 `.`、`/`、
+`。`、`．`、`!`、`！`；人物卡和昵称数据使用 MaiBot 注入的插件专属 `data_dir`。
+
 ### `.help` 和自定义命令
 
 `.help` 返回内置命令说明：
@@ -817,7 +835,7 @@ store.delete("example.json")
 python -m unittest discover -s tests -v
 ```
 
-当前测试脚本覆盖 16 个功能面，共 94 项测试：
+当前测试脚本覆盖 17 个功能面，共 100 项测试：
 
 | 测试脚本 | 覆盖内容 |
 | --- | --- |
@@ -838,6 +856,7 @@ python -m unittest discover -s tests -v
 | `tests/test_commands.py` | `.r/.rc/.ra/.rcp/.coc/.st/.sc/.ri/.help`、别名、重复、隐藏、自定义命令 |
 | `tests/test_command_manual_coverage.py` | 用户手册核心指令、紧凑别名、状态操作、人物卡、牌堆和平台边界 |
 | `tests/test_command_cli.py` | 通过命令行参数输入完整指令 |
+| `tests/test_maibot_adapter.py` | MaiBot 消息映射、QQ 群聊/私聊、前缀拦截和回复发送 |
 
 另外保留：
 

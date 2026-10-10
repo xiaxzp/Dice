@@ -1,0 +1,30 @@
+{
+  "manifest_version": 2,
+  "id": "com.dice-developer.trpg-dice",
+  "version": "0.1.0",
+  "name": "TRPG Dice",
+  "description": "通过 MaiBot 接收 QQ 骰子指令并调用独立 TRPG Dice 核心回复结果。",
+  "author": {
+    "name": "Dice! contributors",
+    "url": "https://github.com/Dice-Developer-Team/Dice"
+  },
+  "license": "AGPL-3.0-or-later",
+  "urls": {
+    "repository": "https://github.com/Dice-Developer-Team/Dice",
+    "documentation": "https://docs.mai-mai.org/plugin/"
+  },
+  "host_application": {
+    "min_version": "0.0.0",
+    "max_version": "99.99.99"
+  },
+  "sdk": {
+    "min_version": "2.0.0",
+    "max_version": "2.99.99"
+  },
+  "plugin_type": "adapter",
+  "capabilities": ["send_message"],
+  "i18n": {
+    "default_locale": "zh-CN",
+    "supported_locales": ["zh-CN"]
+  }
+}

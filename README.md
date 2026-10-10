@@ -32,6 +32,12 @@ Latest Release: [![GitHub release](https://img.shields.io/github/release-pre/Dic
 
 在大多数情况下，你不需要自行编译。你可以在Github Releases 以及 Github Actions中找到编译好的二进制版本。
 
+## 独立 Python 骰子模块
+
+`dice_core_py/` 是与 QQ/OneBot 消息逻辑解耦的 Python 3 模块，提供骰子表达式、奖惩骰、人物卡/昵称来源绑定和 JSON 持久化。详见 `dice_core_py/README.md`。
+
+Python 模块还提供平台无关的指令总入口 `CommandRouter`，可通过参数传入 `.r`、`.rc`、`.coc`、`.st` 等完整指令，由 QQ 适配器负责把返回结果转换成消息。
+
 ## Issue提交
 
 提交Issue前请务必确认没有其他人提交过相同的Issue, 善用搜索功能 提交Bug时最好附有截图以及问题复现方法, 同时也欢迎新功能建议
@@ -52,4 +58,3 @@ See the GNU Affero General Public License for more details.
 
 You should have received a copy of the GNU Affero General Public License along with this
 program. If not, see <http://www.gnu.org/licenses/>.
-

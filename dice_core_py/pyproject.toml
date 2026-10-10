@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trpg-dice-core"
+version = "0.1.0"
+description = "QQ-independent TRPG dice, character card, and JSON persistence core"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "AGPL-3.0-or-later"}
+authors = [{name = "Dice! contributors"}]
+dependencies = []
+
+[project.scripts]
+trpg-dice = "trpg_dice.cli:main"
+trpg-dice-command = "trpg_dice.command_cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+trpg_dice = ["py.typed"]

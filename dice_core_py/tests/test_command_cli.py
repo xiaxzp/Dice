@@ -53,7 +53,7 @@ class CommandCliTest(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
-        self.assertIn("本地用户:", completed.stdout)
+        self.assertIn("本地用户掷骰:", completed.stdout)
 
 
 if __name__ == "__main__":

@@ -81,6 +81,13 @@ class DiceSession:
             self.touch()
         return existed
 
+    def remove_observer(self, actor: ActorRef) -> bool:
+        existed = actor in self.observers
+        self.observers.discard(actor)
+        if existed:
+            self.touch()
+        return existed
+
     def add_observer(self, actor: ActorRef) -> bool:
         if actor in self.game_masters or actor in self.players:
             return False

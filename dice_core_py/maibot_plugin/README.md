@@ -1,8 +1,9 @@
 # MaiBot 适配器
 
 这个目录是 MaiBot 第三方插件。MaiBot 自己负责通过 QQ 平台接收消息；插件监听
-`ON_MESSAGE_PRE_PROCESS`，命中骰子前缀后调用 `trpg-dice-core` 的 `CommandRouter`，
-再通过 `ctx.send.text()` 回复到原聊天流，并阻止消息继续进入 MaiBot 对话链。
+`@Command` 组件使用正则匹配带符号前缀的消息，命中后调用 `trpg-dice-core` 的
+`CommandRouter`，再通过 `ctx.send.text()` 回复到原聊天流，并以命令拦截级别阻止消息
+继续进入 MaiBot 对话链。
 
 ## 安装
 
@@ -44,6 +45,12 @@
 
 ## 版本说明
 
+骰子核心的回执支持原版消息模板。模板按插件数据目录保存于
+`config/custom_messages.json`，可在 QQ 中使用 `.str` 查看、设置、重置消息键；
+例如 `.str strRollDice {pc} => {res}`。模板支持 `{pc}`、`{nick}`、`{res}`、`{reason}`、
+`{sample}`、`{ran}`、`{case}`、`{grade}`、`{br}`、`{at}` 等占位符。
+
 适配器依赖 `maibot-plugin-sdk >= 2.0` 的 `EventHandler` 接口。它不导入 MaiBot 的
 `src.*` 私有模块，只使用公开 SDK 和 `trpg-dice-core`，因此 QQ/OneBot 传输逻辑仍由
-MaiBot 负责。
+MaiBot 负责。`.admin`、`.cloud`、`.link`、`.mod`、`.user`、`.system` 等涉及权限、
+网络或进程控制的原版命令仍由适配器或宿主平台提供，核心只返回明确的边界结果。

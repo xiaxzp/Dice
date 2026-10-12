@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 from typing import Any, Awaitable, Callable, Mapping
+
+
+_BUNDLED_SOURCE = Path(__file__).resolve().parents[1] / "src"
+if _BUNDLED_SOURCE.is_dir() and str(_BUNDLED_SOURCE) not in sys.path:
+    sys.path.insert(0, str(_BUNDLED_SOURCE))
 
 from trpg_dice import (
     ActorRef,

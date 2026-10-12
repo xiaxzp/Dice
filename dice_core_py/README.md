@@ -23,6 +23,7 @@
 - [人物卡](#人物卡)
 - [DiceEngine 门面](#diceengine-门面)
 - [命令总入口](#命令总入口)
+- [消息模板](#消息模板)
 - [MaiBot 适配器](#maibot-适配器)
 - [轮盘骰](#轮盘骰)
 - [牌堆](#牌堆)
@@ -508,7 +509,10 @@ response = router.dispatch(request)
 | `.rc 极难属性` | 成功率乘以 `0.2` | `.rc 极难幸运` |
 | `.rc _属性` | 标记为隐藏检定 | `.rc _心理学` |
 | `.ra ...` | `.rc` 的奖励骰模式 | `.ra 幸运` |
+| `.rcb ...` | `.rc` 的紧凑奖励骰模式 | `.rcb 幸运` |
+| `.rcbN ...` | 使用 N 个奖励骰 | `.rcb2 幸运` |
 | `.rcp ...` | `.rc` 的惩罚骰模式 | `.rcp 幸运` |
+| `.rcpN ...` | 使用 N 个惩罚骰 | `.rcp2 幸运` |
 | `.rcN#属性` | 重复检定 N 次 | `.rc3#幸运` |
 
 属性表达式可以使用 `+ - * /` 和人物卡中的数值属性，例如 `.rc 体质*5`。`.rc` 的 `metadata` 包含 `skill`、`target`、`difficulty`、`hidden`、`mode` 和 `repeat`。
@@ -534,6 +538,7 @@ response = router.dispatch(request)
 | `.st 属性:值 ...` | 设置属性 | `.st 力量:50 敏捷:40` |
 | `.st 属性=值` | 设置属性的等价写法 | `.st san=60` |
 | `.st 属性+表达式` | 在原值上增加 | `.st san+1d6` |
+| `.st 名称数字...` | 无分隔符连续设置属性 | `.st 射击40斗殴50` |
 | `.st 属性-表达式` | 在原值上减少 | `.st hp-1` |
 | `.st show` | 查看全部属性 | `.st show` |
 | `.st show 属性` | 查看单个属性 | `.st show 幸运` |
@@ -572,14 +577,15 @@ response = router.dispatch(request)
 | `.ob` | 已实现 | 会话旁观者的 join/exit/list/clr/on/off | `test_command_manual_coverage.py` |
 | `.set` | 已实现 | 用户或当前人物卡的默认骰面数 | `test_command_manual_coverage.py` |
 | `.name`、`.nn`、`.nnn` | 已实现 | 确定性随机昵称和来源级称呼 | `test_command_manual_coverage.py` |
-| `.dnd`、`.pc` | 已实现 | DND 属性生成和人物卡 CRUD/绑定 | `test_command_manual_coverage.py` |
-| `.setcoc`、`.ti`、`.li`、`.en` | 已实现 | 房规、疯狂症状和成长检定 | `test_command_manual_coverage.py` |
+| `.dnd`、`.pc` | 已实现 | DND 属性生成、人物卡 CRUD/绑定、`type/temp/tojson/stat` | `test_command_manual_coverage.py` |
+| `.setcoc`、`.ti`、`.li`、`.en` | 已实现 | 房规、C 风格疯狂症状表和成长检定 | `test_command_manual_coverage.py` |
 | `.init` | 已实现 | 查看或清空当前会话先攻列表 | `test_command_manual_coverage.py` |
 | `.w`、`.ww` | 已实现 | 10 面骰池和详细骰点结果 | `test_command_manual_coverage.py` |
 | `.me`、`.jrrp`、`.welcome` | 已实现 | 结构化动作、每日人品和欢迎词状态 | `test_command_manual_coverage.py` |
-| `.draw`、`.deck` | 已实现 | 牌堆抽取、重置、清空和 range 牌堆 | `test_command_manual_coverage.py`、`test_deck.py` |
+| `.draw`、`.deck` | 已实现 | 公共/自定义牌堆抽取、删除、重置、清空和 range 牌堆 | `test_command_manual_coverage.py`、`test_deck.py` |
 | `.ak` | 已实现 | 分歧的新建、增删选项、随机抽取和清空 | `test_command_manual_coverage.py` |
-| `.rules`、`.log` | 核心状态已实现 | 规则默认项和日志状态可持久化；规则词库、日志文件上传由适配器提供 | `test_command_manual_coverage.py` |
+| `.rule`、`.rules`、`.log` | 核心状态已实现 | 规则别名/默认项和日志状态可持久化；规则词库、日志文件上传由适配器提供 | `test_command_manual_coverage.py` |
+| `.game` | 已实现 | 会话生命周期、GM/PL、设置、轮盘骰及历史状态 | `test_command_manual_coverage.py`、`test_session.py` |
 
 上表中的紧凑写法也有回归覆盖：`.r3#p`、`.rb`、`.rp`、`.nnn jp`、`.ak#/+/-/=`、`.drawh` 和 `.ri2DK`。
 
@@ -587,13 +593,14 @@ response = router.dispatch(request)
 
 以下命令已被 `CommandRouter` 识别，但不会在核心模块中伪造 QQ 或其他平台能力。它们返回 `metadata["platform_boundary"] == True`，由适配器负责权限、消息发送、群操作和扩展脚本：
 
-`.bot`、`.reply`、`.dismiss`、`!authorize`、`.send`、`.group`，以及扩展指令 `.rdc`、`.rdx`、`.rsr`、`.rnc`、`.rfc`、`.rbh`、`.rws`。
+`.admin`、`.cloud`、`.bot`、`.reply`、`.dismiss`、`!authorize`、`.send`、`.group`、`.link`、`.mod`、`.user`、`.system`，以及扩展指令 `.rdc`、`.rdx`、`.rsr`、`.rnc`、`.rfc`、`.rbh`、`.rws`。
 
 这些边界命令和未知帮助词条建议均有 `tests/test_command_manual_coverage.py` 回归测试。当前核心仍不包含 QQ 权限、CQ 码、远程规则词库、日志上传或原项目 Lua/脚本扩展执行。
 
 ## MaiBot 适配器
 
-`maibot_plugin/` 是可复制到 MaiBot `plugins/` 目录的第三方插件适配器。它监听
+`dice_core_py/` 根目录本身就是可复制到 MaiBot `plugins/` 目录的第三方插件目录，
+其中 `_manifest.json` 和 `plugin.py` 位于插件根目录。它监听
 `ON_MESSAGE_PRE_PROCESS`，将 MaiBot 的 QQ 群聊/私聊消息转换为 `MessageContext`，
 调用本模块的 `CommandRouter`，再用 `ctx.send.text()` 回复到原聊天流。命中前缀后会
 阻止消息继续进入 MaiBot 的普通对话链。
@@ -602,10 +609,10 @@ response = router.dispatch(request)
 
 ```bash
 python -m pip install -e dice_core_py
-cp -R dice_core_py/maibot_plugin /path/to/MaiBot/plugins/
+cp -R dice_core_py /path/to/MaiBot/plugins/trpg-dice
 ```
 
-插件目录、配置、兼容说明和前缀列表见 `maibot_plugin/README.md`。默认支持 `.`、`/`、
+适配器实现、配置、兼容说明和前缀列表见 `maibot_plugin/README.md`。默认支持 `.`、`/`、
 `。`、`．`、`!`、`！`；人物卡和昵称数据使用 MaiBot 注入的插件专属 `data_dir`。
 
 ### `.help` 和自定义命令
@@ -835,7 +842,7 @@ store.delete("example.json")
 python -m unittest discover -s tests -v
 ```
 
-当前测试脚本覆盖 17 个功能面，共 100 项测试：
+当前测试脚本覆盖 17 个功能面，共 101 项测试：
 
 | 测试脚本 | 覆盖内容 |
 | --- | --- |
@@ -883,6 +890,30 @@ python tests/test_l5r.py
 - Lua、JavaScript、动态 Python 脚本执行。
 - 远程规则手册查询和依赖 QQ 登录态的网络请求。
 - 原 C++ `PlayerCards.RDconf`、`UserConf.dat` 二进制文件直接读取。
-- 原项目动态消息模板、机器人开关、GUI、网络服务。
+- 原项目 QQ/网络权限相关的动态机器人管理、GUI、网络服务，以及 Lua/JS 扩展运行时。
 
 这些能力可以在核心模块之上实现适配器，但不应反向把平台对象或消息事件引入 `trpg_dice`。
+
+## 消息模板
+
+`CommandRouter` 使用 `MessageCatalog` 恢复原 Dice! 的可配置回执。自定义内容保存在
+数据目录的 `config/custom_messages.json`，不会写入源码目录；构造新的路由器后仍会自动加载。
+
+通过 `.str` 管理模板：
+
+```text
+.str                         列出默认和自定义键
+.str strRollDice             查看当前文本
+.str strRollDice show         查看当前文本
+.str strRollDice 新文本       设置文本
+.str strRollDice NULL         设置为空
+.str strRollDice reset        恢复默认文本
+```
+
+常用默认键包括 `strRollDice`、`strRollDiceReason`、`strRollMultiDice`、
+`strRollSkill`、`strRollSkillHidden`、`strSanityRoll`、`strEnRoll*`、`strRollInit`、
+`strNameGenerator`、`strDrawCard`、`strDrawHidden`、`strJrrp`、`strTempInsane` 和
+`strLongInsane`。模板支持 `{pc}`、`{nick}`、`{res}`、`{reason}`、`{br}`、`{FormFeed}`、
+`{sample:a|b}`、`{ran:1~10}`、`{case:key?value=text&else=other}`、
+`{grade:key?threshold=text&else=other}`、`{var:name?value}`、`{at:value}`、`{len:value}`、
+`{print:value}` 以及通过 `&` 重定向到其他消息键。

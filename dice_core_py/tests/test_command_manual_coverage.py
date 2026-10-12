@@ -188,6 +188,24 @@ class ManualCommandCoverageTest(unittest.TestCase):
         self.assertEqual(redone.result.card_id, created.result.card_id)
         self.assertEqual(self.run_command(".pc stat").result, {})
 
+    def test_c_audit_core_aliases_public_decks_game_and_statistics(self):
+        self.assertEqual(self.run_command(".rd d6").command, "r")
+        self.run_command(".deck set cards=扑克牌")
+        self.assertEqual(self.run_command(".deck show cards").result["cards"]["entries"].__len__(), 54)
+        self.run_command(".game new table")
+        self.run_command(".game rou 20*2")
+        self.assertEqual(self.run_command(".game rou show").result["20"]["copies"], 2)
+        self.assertIn(self.run_command(".r d20").result.result.total, range(1, 21))
+        self.assertEqual(len(self.session.data["roulette_history"]), 1)
+        self.run_command(".game rou hist")
+        self.run_command(".game rou reset")
+        self.run_command(".game rou clr")
+        self.run_command(".pc new stats")
+        self.run_command(".pc tag stats")
+        self.run_command(".r d100")
+        self.assertGreater(self.run_command(".pc stat").result["dice"]["count"], 0)
+        self.assertEqual(self.run_command(".rule set dnd").command, "rule")
+
     def test_document_boundary_commands_are_explicitly_adapter_owned(self):
         for command in (
             ".bot on", ".reply off", ".dismiss", "!authorize reason",

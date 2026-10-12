@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import math
 import re
 from difflib import get_close_matches
 from datetime import date
@@ -10,14 +12,104 @@ from .engine import DiceEngine
 from .errors import CommandError, IdentityError, UnknownCommandError
 from .models import (
     CheckResult,
+    DiceTermResult,
     MessageContext,
     RollRequest,
     RollResponse,
+    RollResult,
 )
+from .messages import MessageCatalog
 from .profiles import CharacterCard, IdentityServices
-from .roller import DiceRoller
+from .roller import DiceRoller, coc_success_level
 from .session import DiceSession
-from .special import DeckEntry
+from .special import Deck, DeckEntry, Roulette
+
+
+_TEMPORARY_INSANITY = (
+    "",
+    "失忆：在{dur}轮之内，{pc}会发现自己只记得最后身处的安全地点，却没有任何来到这里的记忆。",
+    "假性残疾：{pc}陷入了心理性的失明、失聪或躯体缺失感中，持续{dur}轮。",
+    "暴力倾向：{pc}陷入了六亲不认的暴力行为中，对周围的敌人与友方进行着无差别的攻击，持续{dur}轮。",
+    "偏执：{pc}陷入了严重的偏执妄想之中。有人在暗中窥视着他们，同伴中有人背叛了他们，没有人可以信任，万事皆虚。持续{dur}轮。",
+    "人际依赖：{pc}因为一些原因而将他人误认为了他重要的人并且努力的会与那个人保持那种关系，持续{dur}轮。",
+    "昏厥：{pc}当场昏倒，昏迷状态持续{dur}轮。",
+    "逃避行为：{pc}会用任何的手段试图逃离现在所处的位置，状态持续{dur}轮。",
+    "竭嘶底里：{pc}表现出大笑，哭泣，嘶吼，害怕等的极端情绪表现，持续{dur}轮。",
+    "恐惧：{pc}陷入对某一事物的恐惧之中，持续{dur}轮。\n{detail_roll}\n具体恐惧症：{detail}",
+    "躁狂：{pc}由于某种诱因进入躁狂状态，症状持续{dur}轮。\n{detail_roll}\n具体躁狂症：{detail}",
+)
+
+_LONG_INSANITY = (
+    "",
+    "失忆：在{dur}小时后，{pc}回过神来，发现自己身处一个陌生的地方，并忘记了自己是谁。记忆会随时间恢复。",
+    "被窃：{pc}在{dur}小时后恢复清醒，发觉自己被盗，身体毫发无损。",
+    "遍体鳞伤：{pc}在{dur}小时后恢复清醒，发现自己身上满是拳痕和瘀伤。生命值减少到疯狂前的一半。",
+    "暴力倾向：{pc}陷入强烈的暴力与破坏欲之中，持续{dur}小时。",
+    "极端信念：在{dur}小时之内，{pc}会采取极端和疯狂的表现手段展示他们的思想信念之一。",
+    "重要之人：在{dur}小时中，{pc}将不顾一切地接近重要的那个人，并为关系做出行动。",
+    "被收容：{dur}小时后，{pc}在精神病院病房或警察局牢房中回过神来。",
+    "逃避行为：{dur}小时后，{pc}恢复清醒时发现自己在很远的地方。",
+    "恐惧：{pc}患上一个新的恐惧症，会在{dur}小时后恢复正常。\n{detail_roll}\n具体恐惧症：{detail}",
+    "躁狂：{pc}患上一个新的躁狂症，在{dur}小时后恢复理智。\n{detail_roll}\n具体躁狂症：{detail}",
+)
+
+_INSANITY_DETAILS = (
+    "洗澡恐惧症：对于洗涤或洗澡的恐惧。",
+    "恐高症：对于身处高处的恐惧。",
+    "幽闭恐惧症：对于处在封闭空间中的恐惧。",
+    "恐犬症：对狗的恐惧。",
+    "恐水症：对水的恐惧。",
+    "恐惧黑暗：对黑暗或夜晚的恐惧。",
+    "人群恐惧症：对于人群的恐惧。",
+    "恐蛇症：对蛇的恐惧。",
+    "恐火症：对火的恐惧。",
+    "恐惧死亡：对死亡或尸体的恐惧。",
+)
+
+_PUBLIC_DECKS = {
+    "数字": tuple(str(value) for value in range(10)),
+    "大写字母": tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+    "小写字母": tuple("abcdefghijklmnopqrstuvwxyz"),
+    "天干": tuple("甲乙丙丁戊己庚辛壬癸"),
+    "地支": tuple("子丑寅卯辰巳午未申酉戌亥"),
+    "硬币": ("正", "反"),
+    "性别": ("男", "女"),
+    "扑克牌": tuple(
+        f"{suit}{rank}"
+        for suit in ("红桃", "黑桃", "方片", "梅花")
+        for rank in ("A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K")
+    ) + ("小王", "大王"),
+    "麻将牌": tuple(
+        [tile for tile in (
+            [f"{number}万" for number in "一二三四五六七八九"]
+            + [f"{number}筒" for number in "一二三四五六七八九"]
+            + [f"{number}条" for number in "一二三四五六七八九"]
+            + ["东风", "南风", "西风", "北风", "中", "发", "白"]
+        ) for _ in range(4)]
+    ),
+}
+
+_SKILL_ALIASES = {
+    "str": "力量", "dex": "敏捷", "pow": "意志", "siz": "体型", "app": "外貌",
+    "luck": "幸运", "luk": "幸运", "con": "体质", "int": "智力", "idea": "灵感",
+    "edu": "教育", "san": "理智", "hp": "生命", "mp": "魔法", "侦察": "侦查",
+    "计算机": "计算机使用", "cr": "信用评级", "信誉": "信用评级", "驾驶": "汽车驾驶",
+    "快速交谈": "话术", "绞具": "绞索", "链枷": "连枷", "步枪": "步枪/霰弹枪",
+}
+
+_DEFAULT_SKILLS = {
+    "会计": 5, "人类学": 1, "估价": 5, "考古学": 1, "作画": 5, "摄影": 5,
+    "表演": 5, "伪造": 5, "文学": 5, "厨艺": 5, "裁缝": 5, "建筑": 5,
+    "舞蹈": 5, "捕鱼": 5, "歌唱": 5, "杂技": 5, "取悦": 15, "魅惑": 15,
+    "攀爬": 20, "计算机使用": 5, "克苏鲁神话": 0, "乔装": 5, "汽车驾驶": 20,
+    "电气维修": 10, "电子学": 1, "话术": 5, "鞭子": 5, "斧": 15, "链锯": 10,
+    "连枷": 10, "绞索": 15, "矛": 20, "剑": 20, "手枪": 20, "步枪/霰弹枪": 25,
+    "冲锋枪": 15, "弓术": 15, "急救": 30, "历史": 5, "恐吓": 15, "跳跃": 20,
+    "法律": 5, "图书馆使用": 20, "聆听": 20, "锁匠": 1, "机械维修": 10,
+    "医学": 1, "博物学": 10, "导航": 10, "神秘学": 5, "说服": 10, "精神分析": 1,
+    "心理学": 10, "骑术": 5, "侦查": 25, "潜行": 20, "游泳": 20, "投掷": 20,
+    "追踪": 10, "闪避": 0, "斗殴": 25,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +172,10 @@ class CommandRouter:
         self.roller: DiceRoller = engine.roller
         self.session = session
         self._sessions: dict[str, DiceSession] = {}
+        self.messages = MessageCatalog(
+            self.identities.repository.store.root,
+            random_int=self.roller.randint,
+        )
         self._handlers: dict[str, Callable[[MessageContext, str, dict[str, Any]], CommandResponse]] = {
             "r": self._handle_roll,
             "ob": self._handle_observer,
@@ -92,6 +188,7 @@ class CommandRouter:
             "dnd": self._handle_dnd,
             "pc": self._handle_pc,
             "st": self._handle_status,
+            "str": self._handle_message_text,
             "setcoc": self._handle_setcoc,
             "sc": self._handle_sanity,
             "ti": self._handle_madness,
@@ -108,11 +205,14 @@ class CommandRouter:
             "deck": self._handle_deck,
             "ak": self._handle_ank,
             "rules": self._handle_rules,
+            "rule": self._handle_rules,
             "log": self._handle_log,
+            "game": self._handle_game,
             "help": self._handle_help,
         }
         for name in (
-            "bot", "reply", "dismiss", "authorize", "send", "group",
+            "bot", "reply", "dismiss", "authorize", "send", "group", "link",
+            "admin", "cloud", "mod", "user", "system",
             "rdc", "rdx", "rsr", "rnc", "rfc", "rbh", "rws",
         ):
             self._handlers[name] = self._handle_adapter_boundary
@@ -165,20 +265,36 @@ class CommandRouter:
             operation = lower[2]
             value = body[3:].strip() if len(body) > 3 else ""
             return _ParsedCommand("ak", f"{operation} {value}".strip(), {})
-        for command in ("authorize", "dismiss", "reply", "welcome", "rules", "group", "jrrp", "init", "name", "send", "deck", "draw", "dnd", "pc", "ob", "set", "nnn", "nn", "log", "bot", "me", "ti", "li", "en", "ww", "w", "ak"):
+        for command in ("authorize", "dismiss", "reply", "welcome", "rules", "rule", "group", "game", "jrrp", "init", "name", "send", "deck", "draw", "dnd", "pc", "ob", "set", "nnn", "nn", "log", "bot", "me", "ti", "li", "en", "ww", "w", "ak"):
             if lower == command or lower.startswith(command + " "):
                 return _ParsedCommand(command, body[len(command):].strip(), {"detailed": command == "ww"})
         for command in ("rdc", "rdx", "rsr", "rnc", "rfc", "rbh", "rws"):
             if lower.startswith(command):
                 return _ParsedCommand(command, body[len(command):].strip(), {})
+        if lower == "str" or lower.startswith("str "):
+            return _ParsedCommand("str", body[3:].strip(), {})
         if lower.startswith("st"):
             return _ParsedCommand("st", body[2:].strip(), {})
         if lower.startswith("sc"):
             return _ParsedCommand("sc", body[2:].strip(), {})
         if lower.startswith("ri"):
             return _ParsedCommand("ri", body[2:].strip(), {})
+        if lower.startswith("rcb"):
+            tail = body[3:]
+            count_match = re.match(r"^(\d+)(.*)$", tail)
+            if count_match:
+                count = count_match.group(1)
+                arguments = count_match.group(2).strip()
+                return _ParsedCommand("rc", f"b{count} {arguments}".strip(), {"mode": "bonus"})
+            return _ParsedCommand("rc", tail.strip(), {"mode": "bonus"})
         if lower.startswith("rcp"):
-            return _ParsedCommand("rc", body[3:].strip(), {"mode": "penalty"})
+            tail = body[3:]
+            count_match = re.match(r"^(\d+)(.*)$", tail)
+            if count_match:
+                count = count_match.group(1)
+                arguments = count_match.group(2).strip()
+                return _ParsedCommand("rc", f"p{count} {arguments}".strip(), {"mode": "penalty"})
+            return _ParsedCommand("rc", tail.strip(), {"mode": "penalty"})
         if lower.startswith("ra"):
             return _ParsedCommand("rc", body[2:].strip(), {"mode": "bonus"})
         if lower.startswith("rc"):
@@ -195,6 +311,8 @@ class CommandRouter:
             return _ParsedCommand("r", body[2:].strip(), {"short": True})
         if lower.startswith("roll"):
             return _ParsedCommand("r", body[4:].strip(), {})
+        if lower == "rd" or lower.startswith("rd "):
+            return _ParsedCommand("r", body[2:].strip(), {})
         if lower.startswith("r"):
             return _ParsedCommand("r", body[1:].strip(), {})
         command, _, args = body.partition(" ")
@@ -240,14 +358,182 @@ class CommandRouter:
                     expression = candidate
                     reason = original_expression + (f" {trailing_reason}" if trailing_reason else "")
         responses = [
-            self.engine.roll(RollRequest(context, expression, reason))
+            self._roll_response(context, expression, reason)
             for _ in range(repeat)
         ]
+        if card is not None:
+            for response in responses:
+                self._record_roll_stat(
+                    context, card, response.result.total, response.result.normalized_expression
+                )
         result: RollResponse | list[RollResponse] = responses[0] if repeat == 1 else responses
-        rendered = "\n".join(self._render_roll(response, metadata) for response in responses)
+        if repeat > 1:
+            values = self._message_values(context, metadata)
+            if metadata.get("short"):
+                result_text = "{ " + ",".join(str(response.result.total) for response in responses) + " }"
+            else:
+                result_text = ", ".join(response.result.render() for response in responses)
+            values.update(
+                {
+                    "turn": repeat,
+                    "dice_exp": responses[0].result.normalized_expression,
+                    "res": result_text,
+                }
+            )
+            key = "strRollMultiDiceReason" if reason else "strRollMultiDice"
+            rendered = self.messages.render(key, values)
+        else:
+            rendered = (
+                self.messages.render(
+                    "strRollHidden",
+                    self._message_values(context, {"pc": responses[0].card_name or responses[0].display_name}),
+                )
+                if metadata.get("hidden")
+                else self._render_roll(context, responses[0], metadata)
+            )
         response_metadata = dict(metadata)
         response_metadata.update({"repeat": repeat, "reason": reason})
+        if metadata.get("hidden"):
+            if repeat > 1:
+                private_values = self._message_values(
+                    context,
+                    {
+                        "turn": repeat,
+                        "dice_exp": responses[0].result.normalized_expression,
+                        "res": ", ".join(response.result.render() for response in responses),
+                    },
+                )
+                private_key = "strRollMultiDiceReason" if reason else "strRollMultiDice"
+                response_metadata["private_rendered"] = self.messages.render(private_key, private_values)
+                response_metadata["public_rendered"] = self.messages.render(
+                    "strRollHidden",
+                    self._message_values(context, {"pc": responses[0].card_name or responses[0].display_name}),
+                )
+                rendered = response_metadata["public_rendered"]
+            else:
+                response_metadata["private_rendered"] = self._render_roll(context, responses[0], metadata)
         return CommandResponse("r", args, result, rendered, response_metadata)
+
+    def _roll_response(
+        self,
+        context: MessageContext,
+        expression: str,
+        reason: str | None,
+    ) -> RollResponse:
+        result = self._roll_session_die(context, expression)
+        if result is None:
+            return self.engine.roll(RollRequest(context, expression, reason))
+        card = self.identities.characters.resolve(context)
+        return RollResponse(
+            request=RollRequest(context, expression, reason),
+            display_name=self.identities.nicknames.resolve(context),
+            card_id=card.card_id if card else None,
+            card_name=card.name if card else None,
+            result=result,
+        )
+
+    def _roll_session_die(
+        self,
+        context: MessageContext,
+        expression: str,
+    ) -> RollResult | None:
+        match = re.fullmatch(r"(?:1)?d(\d+)", expression.strip(), re.IGNORECASE)
+        if match is None:
+            return None
+        sides = int(match.group(1))
+        session = self._session_for(context)
+        if sides not in session.roulettes:
+            return None
+        value = session.roll(sides)
+        session.data.setdefault("roulette_history", []).append(value)
+        normalized = self.roller.normalize(expression)
+        term = DiceTermResult(
+            notation=normalized,
+            kind="normal",
+            subtotal=value,
+            rolls=(value,),
+            kept=(value,),
+            count=1,
+            sides=sides,
+        )
+        return RollResult(
+            expression=expression,
+            normalized_expression=normalized,
+            total=value,
+            terms=(term,),
+        )
+
+    def _coc_check(
+        self,
+        context: MessageContext,
+        target: int,
+        *,
+        bonus_dice: int,
+        penalty_dice: int,
+        rule: int,
+    ) -> CheckResult:
+        if bonus_dice or penalty_dice:
+            return self.roller.coc_check(
+                target,
+                bonus_dice=bonus_dice,
+                penalty_dice=penalty_dice,
+                rule=rule,
+            )
+        roll = self._roll_session_die(context, "d100")
+        if roll is None:
+            return self.roller.coc_check(target, rule=rule)
+        return CheckResult(
+            target=target,
+            roll=roll,
+            success_level=coc_success_level(roll.total, target, rule),
+            rule=rule,
+        )
+
+    def _record_roll_stat(
+        self,
+        context: MessageContext,
+        card: CharacterCard,
+        value: int,
+        expression: str,
+    ) -> None:
+        match = re.fullmatch(r"(?:1)?d(\d+)", expression.strip(), re.IGNORECASE)
+        if match is None:
+            return
+        sides = int(match.group(1))
+        if sides > 100:
+            return
+        current = self.identities.characters.get(context.actor, card.card_id)
+        attributes = dict(current.attributes)
+        prefix = f"__StatD{sides}"
+        attributes[f"{prefix}Cnt"] = int(attributes.get(f"{prefix}Cnt", 0)) + 1
+        attributes[f"{prefix}Sum"] = int(attributes.get(f"{prefix}Sum", 0)) + value
+        attributes[f"{prefix}SqrSum"] = int(attributes.get(f"{prefix}SqrSum", 0)) + value * value
+        self.identities.characters.update(context.actor, current.card_id, attributes=attributes)
+
+    def _record_check_stat(
+        self,
+        context: MessageContext,
+        card: CharacterCard,
+        value: int,
+        target: int,
+    ) -> None:
+        current = self.identities.characters.get(context.actor, card.card_id)
+        attributes = dict(current.attributes)
+        attributes["__StatD100Cnt"] = int(attributes.get("__StatD100Cnt", 0)) + 1
+        attributes["__StatD100Sum"] = int(attributes.get("__StatD100Sum", 0)) + value
+        attributes["__StatD100SqrSum"] = int(attributes.get("__StatD100SqrSum", 0)) + value * value
+        attributes["__StatRcCnt"] = int(attributes.get("__StatRcCnt", 0)) + 1
+        attributes["__StatRcSumSuc"] = int(attributes.get("__StatRcSumSuc", 0)) + int(value <= target)
+        attributes["__StatRcSumRate"] = int(attributes.get("__StatRcSumRate", 0)) + target
+        for key, condition in (
+            ("__StatRcCnt1", value == 1),
+            ("__StatRcCnt5", value <= 5),
+            ("__StatRcCnt96", value >= 96),
+            ("__StatRcCnt100", value == 100),
+        ):
+            if condition:
+                attributes[key] = int(attributes.get(key, 0)) + 1
+        self.identities.characters.update(context.actor, current.card_id, attributes=attributes)
 
     def _handle_check(
         self, context: MessageContext, args: str, metadata: dict[str, Any]
@@ -258,26 +544,39 @@ class CommandRouter:
         hidden = metadata.get("hidden", False) or body.startswith("_")
         if hidden:
             body = body[1:].lstrip()
-        if body[:1].casefold() in {"b", "p"} and (len(body) == 1 or body[1].isspace()):
+        special_match = re.match(r"^([bp])(\d*)(?:\s+|$)", body, flags=re.IGNORECASE)
+        if special_match:
             metadata = dict(metadata)
-            metadata["mode"] = "bonus" if body[0].casefold() == "b" else "penalty"
-            body = body[1:].lstrip()
+            special_mode = "bonus" if special_match.group(1).casefold() == "b" else "penalty"
+            special_count = int(special_match.group(2) or "1")
+            metadata["mode"] = special_mode
+            metadata["bonus_dice"] = special_count if special_mode == "bonus" else 0
+            metadata["penalty_dice"] = special_count if special_mode == "penalty" else 0
+            body = body[special_match.end():].lstrip()
         auto_success = body.startswith("自动成功")
         if auto_success:
             body = body[4:].lstrip()
         difficulty, body = self._read_difficulty(body)
         skill_expression, explicit_target, reason = self._split_check_args(body)
         card = self.identities.characters.resolve(context)
-        attributes = card.attributes if card else {}
+        attributes = dict(card.attributes) if card else {}
         target_expression = explicit_target or skill_expression
+        if explicit_target is None:
+            canonical = _SKILL_ALIASES.get(skill_expression.casefold(), skill_expression)
+            if card is not None and canonical in card.attributes:
+                target_expression = canonical
+            elif canonical in _DEFAULT_SKILLS:
+                attributes[canonical] = _DEFAULT_SKILLS[canonical]
+                target_expression = canonical
         target = self._evaluate_attribute_expression(target_expression, attributes)
         target = max(1, int(target * difficulty))
         mode = metadata.get("mode", "normal")
-        bonus_dice = 1 if mode == "bonus" else 0
-        penalty_dice = 1 if mode == "penalty" else 0
+        bonus_dice = int(metadata.get("bonus_dice", 1 if mode == "bonus" else 0))
+        penalty_dice = int(metadata.get("penalty_dice", 1 if mode == "penalty" else 0))
         rule = int(self._session_for(context).data.get("coc_rule", 0))
         checks = [
-            self.roller.coc_check(
+            self._coc_check(
+                context,
                 target,
                 bonus_dice=bonus_dice,
                 penalty_dice=penalty_dice,
@@ -285,6 +584,9 @@ class CommandRouter:
             )
             for _ in range(repeat)
         ]
+        if card is not None:
+            for check in checks:
+                self._record_check_stat(context, card, check.roll.total, target)
         if auto_success:
             checks = [
                 check
@@ -293,7 +595,9 @@ class CommandRouter:
                 for check in checks
             ]
         result: CheckResult | list[CheckResult] = checks[0] if repeat == 1 else checks
-        rendered = "\n".join(self._render_check(check, hidden) for check in checks)
+        render_metadata = dict(metadata)
+        render_metadata["repeat"] = repeat
+        rendered = self._render_checks(context, checks, skill_expression, reason, hidden, render_metadata)
         response_metadata = dict(metadata)
         response_metadata.update(
             {
@@ -305,8 +609,14 @@ class CommandRouter:
                 "repeat": repeat,
                 "rule": rule,
                 "auto_success": auto_success,
+                "bonus_dice": bonus_dice,
+                "penalty_dice": penalty_dice,
             }
         )
+        if hidden:
+            response_metadata["private_rendered"] = self._render_checks(
+                context, checks, skill_expression, reason, False, render_metadata
+            )
         return CommandResponse("rc", args, result, rendered, response_metadata)
 
     def _handle_coc(
@@ -318,6 +628,7 @@ class CommandRouter:
             variant, compact = 6, compact[1:]
         elif compact.startswith("7"):
             compact = compact[1:]
+        compact = compact.lstrip("s")
         detailed = "d" in compact
         compact = compact.replace("d", "")
         count = int(compact) if compact else 1
@@ -351,21 +662,45 @@ class CommandRouter:
         body = args.strip()
         card = self.identities.characters.resolve(context)
         if body.casefold() == "show" or body.casefold().startswith("show "):
+            requested = ""
             if card is None:
                 result: dict[str, Any] = {}
             else:
                 requested = body[4:].strip()
                 if not requested:
-                    result = card.attributes
+                    result = self._visible_attributes(card.attributes)
                 else:
                     key = self._attribute_key(card.attributes, requested)
                     result = {} if key not in card.attributes else {requested: card.attributes[key]}
-            return CommandResponse("st", args, result, self._render_attributes(result))
+            if not result:
+                rendered = self._render_attributes(result)
+            elif requested:
+                rendered = self.messages.render(
+                    "strProp",
+                    self._message_values(context, {"attr": requested, "val": next(iter(result.values()))}),
+                )
+            else:
+                rendered = self.messages.render(
+                    "strPropList",
+                    self._message_values(
+                        context,
+                        {"char": card.name if card else self.identities.nicknames.resolve(context), "show": self._render_attributes(result)},
+                    ),
+                )
+            return CommandResponse("st", args, result, rendered)
 
         card = card or self._ensure_card(context)
         if body.casefold() == "clr":
             updated = self.identities.characters.update(context.actor, card.card_id, attributes={})
-            return CommandResponse("st", args, updated, "属性已清空")
+            return CommandResponse(
+                "st",
+                args,
+                updated,
+                self.messages.render(
+                    "strPropCleared",
+                    self._message_values(context, {"char": card.name}),
+                ),
+            )
         if body.casefold().startswith("del "):
             names = body[4:].split()
             attributes = dict(card.attributes)
@@ -374,13 +709,22 @@ class CommandRouter:
             updated = self.identities.characters.update(
                 context.actor, card.card_id, attributes=attributes
             )
-            return CommandResponse("st", args, updated, f"已删除属性：{' '.join(names)}")
+            return CommandResponse(
+                "st",
+                args,
+                updated,
+                self.messages.render(
+                    "strPropDeleted",
+                    self._message_values(context, {"attr": "、".join(names)}),
+                ),
+            )
         if not body:
-            return CommandResponse("st", args, card.attributes, self._render_attributes(card.attributes))
+            result = self._visible_attributes(card.attributes)
+            return CommandResponse("st", args, result, self._render_attributes(result))
 
         attributes = dict(card.attributes)
         changed: dict[str, Any] = {}
-        for token in body.split():
+        for token in self._split_status_assignments(body):
             expression_attribute = token.startswith("&")
             name, operator, value_expression = self._parse_attribute_assignment(token)
             current_key = self._attribute_key(attributes, name)
@@ -401,7 +745,15 @@ class CommandRouter:
         updated = self.identities.characters.update(
             context.actor, card.card_id, attributes=attributes
         )
-        return CommandResponse("st", args, updated, self._render_attributes(changed))
+        return CommandResponse(
+            "st",
+            args,
+            updated,
+            self.messages.render(
+                "strSetPropSuccess",
+                self._message_values(context, {"pc": card.name, "cnt": len(changed)}),
+            ),
+        )
 
     def _handle_sanity(
         self, context: MessageContext, args: str, metadata: dict[str, Any]
@@ -423,7 +775,7 @@ class CommandRouter:
         )
         if current is None:
             raise CommandError(".sc requires current san or 理智")
-        roll = self.roller.roll("d100")
+        roll = self._roll_session_die(context, "d100") or self.roller.roll("d100")
         success = roll.total <= current
         loss = self._evaluate_attribute_expression(
             success_loss if success else failure_loss, card.attributes
@@ -437,6 +789,7 @@ class CommandRouter:
         updated = self.identities.characters.update(
             context.actor, card.card_id, attributes=attributes
         )
+        self._record_check_stat(context, updated, roll.total, int(current))
         result = {
             "roll": roll,
             "current": current,
@@ -445,7 +798,27 @@ class CommandRouter:
             "remaining": remaining,
             "card": updated,
         }
-        rendered = f"{roll.render()} / {current} {'成功' if success else '失败'}，损失 {loss}，剩余 {remaining}"
+        from .roller import coc_success_level
+
+        success_level = coc_success_level(roll.total, current, int(self._session_for(context).data.get("coc_rule", 0)))
+        rank = self._success_rank(success_level)
+        card_name = self.identities.nicknames.resolve(context)
+        rendered = self.messages.render(
+            "strSanityRoll",
+            self._message_values(
+                context,
+                {
+                    "pc": card.name,
+                    "res": f"1D100={roll.total}/{current}",
+                    "rank": rank,
+                    "loss": loss,
+                    "change": loss,
+                    "final": remaining,
+                    "current": current,
+                    "nick": card_name,
+                },
+            ),
+        )
         return CommandResponse("sc", args, result, rendered, {"reason": reason})
 
     def _handle_initiative(
@@ -490,6 +863,13 @@ class CommandRouter:
         session.data["initiative"] = list(session.data.get("initiative", [])) + entries
         entries.sort(key=lambda item: item["value"], reverse=True)
         rendered = "\n".join(f"{entry['name']}: {entry['value']}" for entry in entries)
+        rendered = self.messages.render(
+            "strRollInit",
+            self._message_values(
+                context,
+                {"char": name, "res": "\n".join(f"{entry['name']}: {entry['value']}" for entry in entries)},
+            ),
+        )
         return CommandResponse(
             "ri",
             args,
@@ -529,6 +909,8 @@ class CommandRouter:
             "draw/deck": "抽牌和牌堆管理",
             "ak": "安价分歧：.ak new/add/del/get/show/clr",
             "rules": "规则查询和默认规则：.rules [规则:]词条/set [规则]",
+            "rule": "规则查询和默认规则：.rule set [规则] 或 .rule s 词条",
+            "game": "跑团会话：.game master/join/state/set/close/over/exit",
             "log": "日志状态：.log new/on/off/end",
             "bot": "平台适配器：.bot on/off",
             "reply": "平台适配器：.reply on/off",
@@ -572,21 +954,113 @@ class CommandRouter:
         if operation == "join":
             changed = session.add_observer(context.actor)
             result = {"joined": changed, "observers": [item.to_dict() for item in session.observers]}
+            rendered = self.messages.render("strObEnter", self._message_values(context)) if changed else self.messages.render("strObEnterAlready", self._message_values(context))
         elif operation == "exit":
             changed = context.actor in session.observers
             session.observers.discard(context.actor)
             result = {"exited": changed, "observers": [item.to_dict() for item in session.observers]}
+            rendered = self.messages.render("strObExit", self._message_values(context)) if changed else self.messages.render("strObExitAlready", self._message_values(context))
         elif operation == "list":
             result = [item.to_dict() for item in sorted(session.observers, key=lambda item: item.key)]
+            if result:
+                rendered = self.messages.render("strObList", self._message_values(context, {"res": "\n".join(item["user_id"] for item in result)}))
+            else:
+                rendered = self.messages.render("strObListEmpty", self._message_values(context))
         elif operation == "clr":
             session.observers.clear()
             result = []
+            rendered = self.messages.render("strObListClr", self._message_values(context))
         elif operation in {"on", "off"}:
             session.data["observer_enabled"] = operation == "on"
             result = {"enabled": session.data["observer_enabled"]}
+            rendered = self.messages.render(
+                "strObOn" if operation == "on" else "strObOff",
+                self._message_values(context),
+            )
         else:
             raise CommandError(".ob expects join, exit, list, clr, on, or off")
-        return CommandResponse("ob", args, result, str(result), {"operation": operation})
+        return CommandResponse("ob", args, result, rendered, {"operation": operation})
+
+    def _handle_game(
+        self, context: MessageContext, args: str, metadata: dict[str, Any]
+    ) -> CommandResponse:
+        session = self._session_for(context)
+        parts = args.strip().split(maxsplit=1)
+        operation = parts[0].casefold() if parts else "state"
+        value = parts[1].strip() if len(parts) == 2 else ""
+        if operation == "new":
+            session.sources.clear()
+            session.game_masters.clear()
+            session.players.clear()
+            session.observers.clear()
+            session.data.clear()
+            session.data["name"] = value or session.session_id
+            session.add_source(context.source)
+            session.add_gm(context.actor)
+            return CommandResponse("game", args, {"session_id": session.session_id, "created": True}, "已创建新的跑团会话")
+        if operation == "master":
+            changed = session.add_gm(context.actor)
+            return CommandResponse("game", args, {"changed": changed}, "已成为主持人" if changed else "你已经是主持人")
+        if operation == "join":
+            changed = session.add_player(context.actor)
+            return CommandResponse("game", args, {"changed": changed}, "已加入跑团" if changed else "你已经加入跑团")
+        if operation == "exit":
+            changed = session.remove_player(context.actor) or session.remove_gm(context.actor)
+            return CommandResponse("game", args, {"changed": changed}, "已退出跑团" if changed else "你不在跑团中")
+        if operation in {"close", "over"}:
+            session.data["closed"] = True
+            return CommandResponse("game", args, {"closed": True}, "跑团会话已关闭")
+        if operation == "open":
+            session.data["closed"] = False
+            if value:
+                session.data["game_id"] = value
+            return CommandResponse("game", args, {"closed": False}, "跑团会话已打开")
+        if operation == "set":
+            if "=" not in value:
+                raise CommandError(".game set expects key=value")
+            key, item = (part.strip() for part in value.split("=", 1))
+            try:
+                parsed: Any = json.loads(item)
+            except json.JSONDecodeError:
+                parsed = item
+            session.data[key] = parsed
+            return CommandResponse("game", args, {key: parsed}, f"已设置跑团参数：{key}={parsed}")
+        if operation == "call":
+            players = sorted(session.players, key=lambda item: item.key)
+            result = [actor.to_dict() for actor in players]
+            return CommandResponse("game", args, result, "\n".join(actor.user_id for actor in players) or "没有已加入的玩家")
+        if operation == "state":
+            result = session.to_dict()
+            return CommandResponse("game", args, result, json.dumps(result, ensure_ascii=False, sort_keys=True))
+        if operation == "rou":
+            rou_parts = value.split()
+            action = rou_parts[0].casefold() if rou_parts else "show"
+            if action in {"clr", "reset"}:
+                if action == "clr":
+                    session.roulettes.clear()
+                    session.data.pop("roulette_history", None)
+                    return CommandResponse("game", args, {}, "轮盘骰已清空")
+                for roulette in session.roulettes.values():
+                    roulette.reset()
+                session.data["roulette_history"] = []
+                return CommandResponse("game", args, session.to_dict()["roulettes"], "轮盘骰已重置")
+            if action == "hist":
+                history = list(session.data.get("roulette_history", []))
+                return CommandResponse("game", args, history, "\n".join(map(str, history)) or "轮盘骰暂无记录")
+            match = re.fullmatch(r"(\d+)(?:\*(\d+))?", action)
+            if match:
+                sides = int(match.group(1))
+                copies = int(match.group(2) or "1")
+                if sides <= 0 or copies <= 0 or sides * copies > 100:
+                    raise CommandError(".game rou requires positive sides/copies with total at most 100")
+                roulette = session.configure_roulette(sides, copies)
+                session.data["roulette_history"] = []
+                return CommandResponse("game", args, roulette.to_dict(), f"已设置{copies}组D{sides}轮盘骰")
+            if action == "show":
+                result = {str(sides): roulette.to_dict() for sides, roulette in session.roulettes.items()}
+                return CommandResponse("game", args, result, json.dumps(result, ensure_ascii=False, sort_keys=True))
+            raise CommandError(".game rou expects sides[*copies], hist, clr, reset, or show")
+        raise CommandError(f"unknown .game operation: {operation}")
 
     def _handle_set(
         self, context: MessageContext, args: str, metadata: dict[str, Any]
@@ -594,7 +1068,15 @@ class CommandRouter:
         value = args.strip()
         if not value:
             self.identities.settings.remove(context.actor, "default_dice")
-            return CommandResponse("set", args, {"default_sides": 100}, "默认骰已重置")
+            return CommandResponse(
+                "set",
+                args,
+                {"default_sides": 100},
+                self.messages.render(
+                    "strSetDefaultDice",
+                    self._message_values(context, {"default": 100}),
+                ),
+            )
         try:
             sides = int(value)
         except ValueError as error:
@@ -608,7 +1090,15 @@ class CommandRouter:
             attributes = dict(card.attributes)
             attributes["__DefaultDice"] = f"d{sides}"
             self.identities.characters.update(context.actor, card.card_id, attributes=attributes)
-        return CommandResponse("set", args, {"default_sides": sides}, f"默认骰：D{sides}")
+        return CommandResponse(
+            "set",
+            args,
+            {"default_sides": sides},
+            self.messages.render(
+                "strSetDefaultDice",
+                self._message_values(context, {"default": sides}),
+            ),
+        )
 
     def _random_names(self, kind: str, count: int) -> list[str]:
         pools = {
@@ -626,10 +1116,19 @@ class CommandRouter:
         kind = next((part.casefold() for part in parts if part.casefold() in {"cn", "jp", "en"}), "all")
         count_text = next((part for part in parts if part.isdigit()), "1")
         count = int(count_text)
-        if not 1 <= count <= 20:
-            raise CommandError(".name count must be in 1..20")
+        if not 1 <= count <= 10:
+            raise CommandError(".name count must be in 1..10")
         result = self._random_names(kind, count)
-        return CommandResponse("name", args, result, "、".join(result), {"kind": kind, "count": count})
+        return CommandResponse(
+            "name",
+            args,
+            result,
+            self.messages.render(
+                "strNameGenerator",
+                self._message_values(context, {"res": "、".join(result)}),
+            ),
+            {"kind": kind, "count": count},
+        )
 
     def _handle_nickname(
         self, context: MessageContext, args: str, metadata: dict[str, Any]
@@ -639,19 +1138,28 @@ class CommandRouter:
             body = self._random_names(body.casefold() or "all", 1)[0]
         if body.casefold() == "clr":
             result = self.identities.nicknames.clear(context.actor)
-            return CommandResponse("nn", args, result, "已清除全部称呼")
+            return CommandResponse("nn", args, result, self.messages.render("strNameClr", self._message_values(context, {"old_nick": ""})))
         if body.casefold() == "del" or not body:
             source = None if context.source.kind == "private" else context.source
             result = self.identities.nicknames.remove(context.actor, source)
-            return CommandResponse("nn", args, result, "已删除当前称呼")
+            return CommandResponse("nn", args, result, self.messages.render("strNameDel", self._message_values(context, {"old_nick": result or ""})))
         if body.casefold() == "nnn" or body.casefold().startswith("nnn "):
             kind = body[3:].strip().casefold() or "all"
             body = self._random_names(kind, 1)[0]
         elif body.casefold().startswith("n "):
             body = body[2:].strip()
         source = None if context.source.kind == "private" else context.source
+        old_nick = self.identities.nicknames.resolve(context)
         result = self.identities.nicknames.set(context.actor, body, source)
-        return CommandResponse("nn", args, result, f"称呼已设置为：{result}")
+        return CommandResponse(
+            "nn",
+            args,
+            result,
+            self.messages.render(
+                "strNameSet",
+                self._message_values(context, {"old_nick": old_nick, "new_nick": result}),
+            ),
+        )
 
     def _handle_dnd(
         self, context: MessageContext, args: str, metadata: dict[str, Any]
@@ -710,11 +1218,36 @@ class CommandRouter:
                 self.identities.characters.delete(context.actor, card.card_id)
             return CommandResponse("pc", args, len(cards), "人物卡已清空")
         if operation == "stat":
-            return CommandResponse("pc", args, {}, "暂无掷骰统计")
+            return self._render_card_statistics(context, args, current)
+        if operation == "type":
+            if not value:
+                result = {"attr": "模板类", "val": current.system if current else "generic"}
+                return CommandResponse("pc", args, result, f"模板类：{result['val']}")
+            if current is None:
+                raise CommandError("no current character card")
+            updated = self.identities.characters.update(
+                context.actor, current.card_id, system=value
+            )
+            return CommandResponse("pc", args, updated, f"人物卡模板已修改为：{value}")
+        if operation == "temp":
+            if current is None:
+                raise CommandError("no current character card")
+            result = {"system": current.system, "attributes": dict(current.attributes)}
+            return CommandResponse("pc", args, result, self._render_attributes(result["attributes"]))
+        if operation == "tojson":
+            card = self._card_by_ref(context, value) if value else current
+            if card is None:
+                return CommandResponse("pc", args, {}, "无当前人物卡")
+            result = card.to_dict()
+            return CommandResponse("pc", args, result, json.dumps(result, ensure_ascii=False, sort_keys=True))
         if operation == "cpy":
-            if "=" not in value:
+            if "=" in value:
+                destination, target = (item.strip() for item in value.split("=", 1))
+            else:
+                target = value.strip()
+                destination = current.name if current is not None else "副本"
+            if not target:
                 raise CommandError(".pc cpy expects destination=source")
-            destination, target = (item.strip() for item in value.split("=", 1))
             source = self._card_by_ref(context, target)
             card = self.identities.characters.create(
                 context.actor,
@@ -740,6 +1273,73 @@ class CommandRouter:
             card = self.identities.characters.update(context.actor, current.card_id, attributes=attributes)
             return CommandResponse("pc", args, card, self._render_card(card, True))
         raise CommandError(f"unknown .pc operation: {operation}")
+
+    def _render_card_statistics(
+        self,
+        context: MessageContext,
+        args: str,
+        card: CharacterCard | None,
+    ) -> CommandResponse:
+        if card is None:
+            return CommandResponse("pc", args, {}, "暂无掷骰统计")
+        face = self._default_sides(card)
+        attributes = card.attributes
+        dice_key = f"__StatD{face}"
+        count = int(attributes.get(f"{dice_key}Cnt", 0))
+        checks = int(attributes.get("__StatRcCnt", 0))
+        if count <= 0 and checks <= 0:
+            return CommandResponse("pc", args, {}, "暂无掷骰统计")
+        result: dict[str, Any] = {"dice": {}, "checks": {}}
+        lines: list[str] = []
+        if count > 0 and face <= 100:
+            total = int(attributes.get(f"{dice_key}Sum", 0))
+            square_total = int(attributes.get(f"{dice_key}SqrSum", 0))
+            mean = total / count
+            deviation = math.sqrt(max(0.0, square_total / count - mean * mean))
+            expected_mean = (face + 1) / 2
+            expected_deviation = math.sqrt((face * face - 1) / 12)
+            result["dice"] = {
+                "sides": face,
+                "count": count,
+                "mean": mean,
+                "expected_mean": expected_mean,
+                "stddev": deviation,
+                "expected_stddev": expected_deviation,
+            }
+            lines.extend(
+                (
+                    f"D{face}统计次数：{count}",
+                    f"均值：{mean:.2f} [期望 {expected_mean:.2f}]",
+                    f"标准差：{deviation:.2f} [期望 {expected_deviation:.2f}]",
+                )
+            )
+        if checks > 0:
+            successes = int(attributes.get("__StatRcSumSuc", 0))
+            expected_rate = int(attributes.get("__StatRcSumRate", 0)) / checks
+            result["checks"] = {
+                "count": checks,
+                "successes": successes,
+                "success_rate": successes / checks,
+                "expected_rate": expected_rate / 100,
+                "one": int(attributes.get("__StatRcCnt1", 0)),
+                "low": int(attributes.get("__StatRcCnt5", 0)),
+                "high": int(attributes.get("__StatRcCnt96", 0)),
+                "hundred": int(attributes.get("__StatRcCnt100", 0)),
+            }
+            lines.append(f"检定成功率：{successes}/{checks}={successes / checks * 100:.2f}% [期望{expected_rate:.2f}%]")
+            lines.append(
+                f"5- | 96+ 出现数：{result['checks']['low']} | {result['checks']['high']}"
+            )
+            lines.append(
+                f"1 | 100 出现数：{result['checks']['one']} | {result['checks']['hundred']}"
+            )
+        return CommandResponse("pc", args, result, "\n".join(lines))
+
+    @staticmethod
+    def _default_sides(card: CharacterCard) -> int:
+        expression = str(card.attributes.get("__DefaultDice", "d100"))
+        match = re.fullmatch(r"(?:1)?d(\d+)", expression, re.IGNORECASE)
+        return int(match.group(1)) if match else 100
 
     def _card_by_ref(self, context: MessageContext, reference: str) -> CharacterCard:
         normalized = reference.strip()
@@ -774,9 +1374,42 @@ class CommandRouter:
         self, context: MessageContext, args: str, metadata: dict[str, Any]
     ) -> CommandResponse:
         temporary = metadata.get("command") == "ti"
-        duration = "临时" if temporary else "总结"
-        result = {"type": "temporary" if temporary else "indefinite", "duration": duration, "roll": self.roller.roll("d10").total}
-        return CommandResponse("ti" if temporary else "li", args, result, f"{duration}疯狂症状：{result['roll']}")
+        symptom_roll = self.roller.roll("d10").total
+        duration_roll = self.roller.roll("d10").total
+        details: dict[str, Any] = {}
+        if symptom_roll in {9, 10}:
+            detail_roll = self.roller.roll("d100").total
+            details = {
+                "detail_roll": f"1D100={detail_roll}",
+                "detail": _INSANITY_DETAILS[(detail_roll - 1) % len(_INSANITY_DETAILS)],
+            }
+        template = (_TEMPORARY_INSANITY if temporary else _LONG_INSANITY)[symptom_roll]
+        symptom = template.format(
+            pc=self.identities.characters.resolve(context).name
+            if self.identities.characters.resolve(context)
+            else self.identities.nicknames.resolve(context),
+            nick=self.identities.nicknames.resolve(context),
+            dur=duration_roll,
+            detail_roll=details.get("detail_roll", ""),
+            detail=details.get("detail", ""),
+        )
+        result = {
+            "type": "temporary" if temporary else "indefinite",
+            "roll": symptom_roll,
+            "symptom": symptom,
+            "duration": duration_roll,
+            **details,
+        }
+        key = "strTempInsane" if temporary else "strLongInsane"
+        return CommandResponse(
+            "ti" if temporary else "li",
+            args,
+            result,
+            self.messages.render(
+                key,
+                self._message_values(context, {"res": symptom}),
+            ),
+        )
 
     def _handle_growth(
         self, context: MessageContext, args: str, metadata: dict[str, Any]
@@ -784,22 +1417,84 @@ class CommandRouter:
         parts = args.split(maxsplit=2)
         if not parts:
             raise CommandError(".en requires a skill")
-        skill = parts[0]
+        skill = parts[0] if not parts[0].lstrip("+-").isdigit() else ""
         card = self.identities.characters.resolve(context) or self._ensure_card(context)
-        current = self._read_first_numeric(card.attributes, (skill,))
-        if len(parts) > 1:
-            current = self._evaluate_attribute_expression(parts[1], card.attributes)
+        skill = _SKILL_ALIASES.get(skill.casefold(), skill)
+        value_index = 1 if skill else 0
+        current = self._read_first_numeric(card.attributes, (skill,)) if skill else None
+        if len(parts) > value_index and not parts[value_index].startswith(("+", "-")):
+            current = self._evaluate_attribute_expression(parts[value_index], card.attributes)
+        if not skill:
+            skill = self.messages.get("strEnDefaultName")
+        if current is None:
+            current = _DEFAULT_SKILLS.get(skill)
         if current is None:
             raise CommandError(f"unknown skill: {skill}")
-        roll = self.roller.roll("d100")
+        change_expression = parts[value_index] if len(parts) > value_index and parts[value_index].startswith(("+", "-")) else ""
+        if len(parts) > value_index + 1:
+            change_expression = parts[value_index + 1]
+        failure_expression = ""
+        success_expression = "1d10"
+        if "/" in change_expression:
+            failure_expression, success_expression = change_expression.split("/", 1)
+        elif change_expression:
+            success_expression = change_expression
+        roll = self._roll_session_die(context, "d100") or self.roller.roll("d100")
         success = roll.total > current
-        updated_value = current + (self.roller.roll("1d10").total if success else 0)
+        change = 0
+        if success:
+            change = self._evaluate_attribute_expression(success_expression, card.attributes)
+        elif failure_expression:
+            change = self._evaluate_attribute_expression(failure_expression, card.attributes)
+        updated_value = current + change
         attributes = dict(card.attributes)
         key = self._attribute_key(attributes, skill)
         attributes[key] = updated_value
         updated = self.identities.characters.update(context.actor, card.card_id, attributes=attributes)
+        self._record_roll_stat(context, updated, roll.total, "d100")
         result = {"skill": skill, "current": current, "roll": roll, "success": success, "value": updated_value, "card": updated}
-        return CommandResponse("en", args, result, f"{skill}: {roll.total}/{current} {'成长' if success else '未成长'} -> {updated_value}")
+        key = "strEnRollSuccess" if success and change else "strEnRollNotChange" if not change else "strEnRollFailure"
+        rendered = self.messages.render(
+            key,
+            self._message_values(
+                context,
+                {
+                    "pc": card.name,
+                    "nick": self.identities.nicknames.resolve(context),
+                    "attr": skill,
+                    "res": f"1D100={roll.total}/{current} " + self.messages.render(
+                        "strSuccess" if success else "strFailure",
+                        self._message_values(context),
+                    ),
+                    "change": change,
+                    "final": updated_value,
+                },
+            ),
+        )
+        return CommandResponse("en", args, result, rendered)
+
+    def _handle_message_text(
+        self, context: MessageContext, args: str, metadata: dict[str, Any]
+    ) -> CommandResponse:
+        del context, metadata
+        parts = args.strip().split(maxsplit=1)
+        if not parts:
+            result = {key: self.messages.get(key) for key in self.messages.keys()}
+            return CommandResponse("str", args, result, "\n".join(f"{key}: {value}" for key, value in result.items()))
+        key = parts[0]
+        if len(parts) == 1 or parts[1].casefold() == "show":
+            value = self.messages.get(key)
+            if not value and key not in self.messages.custom and key not in self.messages.keys():
+                raise CommandError(f"message key {key!r} does not exist")
+            return CommandResponse("str", args, value, value, {"key": key, "operation": "show"})
+        value = parts[1]
+        if value.casefold() == "reset":
+            existed = self.messages.reset(key)
+            return CommandResponse("str", args, self.messages.get(key), self.messages.get(key), {"key": key, "operation": "reset", "changed": existed})
+        if value.casefold() == "null":
+            value = ""
+        self.messages.set(key, value)
+        return CommandResponse("str", args, value, value, {"key": key, "operation": "set"})
 
     def _handle_init(
         self, context: MessageContext, args: str, metadata: dict[str, Any]
@@ -839,7 +1534,15 @@ class CommandRouter:
         if body.casefold() in {"on", "off"}:
             session = self._session_for(context)
             session.data["me_enabled"] = body.casefold() == "on"
-            return CommandResponse("me", args, session.data["me_enabled"], f"me已{'启用' if session.data['me_enabled'] else '禁用'}")
+            return CommandResponse(
+                "me",
+                args,
+                session.data["me_enabled"],
+                self.messages.render(
+                    "strMeOn" if session.data["me_enabled"] else "strMeOff",
+                    self._message_values(context),
+                ),
+            )
         if not body:
             raise CommandError(".me requires an action")
         return CommandResponse("me", args, {"actor": context.actor.to_dict(), "action": body}, f"{self.identities.nicknames.resolve(context)}{body}")
@@ -856,7 +1559,15 @@ class CommandRouter:
         values = session.data.setdefault("jrrp_values", {})
         if key not in values:
             values[key] = self.roller.randint(1, 100)
-        return CommandResponse("jrrp", args, values[key], f"今日人品：{values[key]}")
+        return CommandResponse(
+            "jrrp",
+            args,
+            values[key],
+            self.messages.render(
+                "strJrrp",
+                self._message_values(context, {"res": values[key]}),
+            ),
+        )
 
     def _handle_welcome(
         self, context: MessageContext, args: str, metadata: dict[str, Any]
@@ -880,14 +1591,46 @@ class CommandRouter:
         hidden = metadata.get("hidden", False) or body.startswith("_") or body.casefold().startswith("h ")
         name = body[1:].strip() if body.startswith("_") else (body[1:].strip() if body.casefold().startswith("h ") else body)
         parts = name.split()
-        if not parts or parts[0] not in session.decks:
-            raise CommandError(f"deck {parts[0] if parts else ''!r} does not exist")
+        if not parts:
+            raise CommandError(".draw requires a deck name")
         count = int(parts[1]) if len(parts) > 1 else 1
         if count < 1:
             raise CommandError("draw count must be positive")
-        entries = [session.draw(parts[0]) for _ in range(count)]
+        if parts[0] in session.decks:
+            entries = []
+            for _ in range(count):
+                if session.decks[parts[0]].remaining == 0:
+                    break
+                entries.append(session.draw(parts[0]))
+            if not entries:
+                raise CommandError(f"deck {parts[0]!r} is empty")
+        elif parts[0] in _PUBLIC_DECKS:
+            remaining = list(_PUBLIC_DECKS[parts[0]])
+            entries = []
+            for _ in range(min(count, len(remaining))):
+                entries.append(DeckEntry(remaining.pop(self.roller.randint(0, len(remaining) - 1))))
+        else:
+            raise CommandError(f"deck {parts[0]!r} does not exist")
         result = [entry.value for entry in entries]
-        return CommandResponse("draw", args, result if count > 1 else result[0], "、".join(result), {"hidden": hidden, "count": count})
+        actual_count = len(entries)
+        values = self._message_values(
+            context,
+            {"res": "、".join(result), "cnt": actual_count},
+        )
+        rendered = self.messages.render(
+            "strDrawHidden" if hidden else "strDrawCard",
+            values,
+        )
+        response_metadata = {"hidden": hidden, "count": actual_count}
+        if hidden:
+            response_metadata["private_rendered"] = self.messages.render("strDrawCard", values)
+        return CommandResponse(
+            "draw",
+            args,
+            result if count > 1 else result[0],
+            rendered,
+            response_metadata,
+        )
 
     def _handle_deck(
         self, context: MessageContext, args: str, metadata: dict[str, Any]
@@ -910,19 +1653,30 @@ class CommandRouter:
                 raise CommandError(f"deck {value!r} does not exist")
             session.decks[value].reset()
             return CommandResponse("deck", args, session.decks[value].remaining, f"牌堆 {value} 已重置")
+        if operation == "del":
+            if value not in session.decks:
+                raise CommandError(f"deck {value!r} does not exist")
+            del session.decks[value]
+            return CommandResponse("deck", args, {}, f"牌堆 {value} 已删除")
         if operation in {"new", "set"}:
             if "=" in value:
                 name, raw_entries = (item.strip() for item in value.split("=", 1))
             else:
-                name, raw_entries = value, ""
+                tokens = value.split(maxsplit=1)
+                name = tokens[0] if tokens else ""
+                raw_entries = value if operation == "set" else (tokens[1] if len(tokens) == 2 else "")
+            if operation == "set" and not raw_entries:
+                raw_entries = name
             if operation == "set" and raw_entries.casefold().startswith("range"):
-                bounds = raw_entries.split()[1:]
-                if len(bounds) != 2:
-                    raise CommandError(".deck set name=range lower upper")
-                lower, upper = (int(item) for item in bounds)
+                range_tokens = raw_entries.split()
+                if len(range_tokens) != 3:
+                    raise CommandError(".deck set range lower upper")
+                lower, upper = (int(item) for item in range_tokens[1:])
                 if lower > upper:
-                    raise CommandError("range lower must not exceed upper")
+                    lower, upper = upper, lower
                 entries = [DeckEntry(str(item)) for item in range(lower, upper + 1)]
+            elif operation == "set" and raw_entries in _PUBLIC_DECKS:
+                entries = [DeckEntry(item) for item in _PUBLIC_DECKS[raw_entries]]
             elif operation == "set" and raw_entries.casefold() == "member":
                 return self._handle_adapter_boundary(context, args, {"command": "deck", "reason": "member list requires adapter input"})
             else:
@@ -971,15 +1725,17 @@ class CommandRouter:
         if body.casefold().startswith("set"):
             rule = body[3:].strip()
             session.data["rules_default"] = rule or None
-            return CommandResponse("rules", args, rule or None, f"默认规则：{rule or 'COC'}")
+            return CommandResponse(metadata.get("command", "rules"), args, rule or None, f"默认规则：{rule or 'COC'}")
         if not body:
             raise CommandError(".rules requires a query or set [rule]")
         if ":" in body or "：" in body:
             rule, query = re.split(r"[:：]", body, maxsplit=1)
         else:
             rule, query = session.data.get("rules_default") or "COC", body
+        if query.casefold().startswith("s "):
+            query = query[2:].strip()
         result = {"rule": rule, "query": query.strip(), "found": False}
-        return CommandResponse("rules", args, result, f"规则查询（{rule}）：{query.strip()}，核心模块未内置词库")
+        return CommandResponse(metadata.get("command", "rules"), args, result, f"规则查询（{rule}）：{query.strip()}，核心模块未内置词库")
 
     def _handle_log(
         self, context: MessageContext, args: str, metadata: dict[str, Any]
@@ -1010,6 +1766,25 @@ class CommandRouter:
             "该指令需要由平台适配器处理",
             {"platform_boundary": True},
         )
+
+    def _message_values(
+        self,
+        context: MessageContext,
+        values: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        nickname = self.identities.nicknames.resolve(context)
+        card = self.identities.characters.resolve(context)
+        result = {
+            "nick": nickname,
+            "pc": card.name if card is not None else nickname,
+            "self": self.messages.get("self"),
+            "uid": context.actor.user_id,
+            "platform": context.actor.platform,
+            "source": context.source.source_id,
+        }
+        if values:
+            result.update(values)
+        return result
 
     def _ensure_card(self, context: MessageContext) -> CharacterCard:
         card = self.identities.characters.resolve(context)
@@ -1091,6 +1866,10 @@ class CommandRouter:
 
     @staticmethod
     def _read_difficulty(body: str) -> tuple[float, str]:
+        if body.startswith("简单"):
+            return 2.0, body[2:].strip()
+        if body.startswith("极限"):
+            return 0.2, body[2:].strip()
         if body.startswith("极难"):
             return 0.2, body[2:].strip()
         if body.startswith("困难"):
@@ -1148,6 +1927,20 @@ class CommandRouter:
         raise CommandError(f"invalid .st assignment: {token}")
 
     @staticmethod
+    def _split_status_assignments(body: str) -> list[str]:
+        tokens: list[str] = []
+        for token in body.split():
+            if any(operator in token for operator in (":", "=", "+", "-", "&")):
+                tokens.append(token)
+                continue
+            matches = re.findall(r"([^\d\s]+?)(\d+)(?=[^\d\s]|$)", token)
+            if matches and "".join(name + value for name, value in matches) == token:
+                tokens.extend(name + value for name, value in matches)
+            else:
+                tokens.append(token)
+        return tokens
+
+    @staticmethod
     def _attribute_key(attributes: dict[str, Any], name: str) -> str:
         for key in attributes:
             if key.casefold() == name.casefold():
@@ -1176,18 +1969,96 @@ class CommandRouter:
         return " ".join(f"{name}:{value}" for name, value in attributes.items())
 
     @staticmethod
+    def _visible_attributes(attributes: dict[str, Any]) -> dict[str, Any]:
+        return {key: value for key, value in attributes.items() if not key.startswith("__")}
+
+    @staticmethod
     def _render_card(card: CharacterCard, detailed: bool) -> str:
         if detailed:
             return f"[{card.card_id}] {card.name}<{card.system}>\n{CommandRouter._render_attributes(card.attributes)}"
-        visible = {key: value for key, value in card.attributes.items() if not key.startswith("__")}
+        visible = CommandRouter._visible_attributes(card.attributes)
         return f"[{card.card_id}] {card.name}<{card.system}> {CommandRouter._render_attributes(visible)}"
 
-    @staticmethod
-    def _render_roll(response: RollResponse, metadata: dict[str, Any]) -> str:
-        prefix = response.display_name
-        return f"{prefix}: {response.result.render()}"
+    def _render_roll(
+        self,
+        context: MessageContext,
+        response: RollResponse,
+        metadata: dict[str, Any],
+    ) -> str:
+        reason = response.request.reason
+        values = self._message_values(
+            context,
+            {
+                "pc": response.card_name or response.display_name,
+                "res": response.result.render(),
+                "reason": reason or "",
+                "dice_exp": response.result.normalized_expression,
+                "turn": metadata.get("repeat", 1),
+            },
+        )
+        key = "strRollDiceReason" if reason else "strRollDice"
+        return self.messages.render(key, values)
+
+    def _render_checks(
+        self,
+        context: MessageContext,
+        checks: list[CheckResult],
+        skill: str,
+        reason: str | None,
+        hidden: bool,
+        metadata: dict[str, Any],
+    ) -> str:
+        if hidden:
+            return self.messages.render(
+                "strRollSkillHidden",
+                self._message_values(context, {"attr": skill, "reason": reason or ""}),
+            )
+        header_key = "strRollSkillReason" if reason else "strRollSkill"
+        header = self.messages.render(
+            header_key,
+            self._message_values(context, {"attr": skill, "reason": reason or ""}),
+        )
+        results = []
+        for check in checks:
+            values = self._message_values(
+                context,
+                {
+                    "res": self._render_check_roll(check),
+                    "target": check.target,
+                    "rank": self._success_rank(check.success_level),
+                },
+            )
+            result_key = {
+                "critical": "strCriticalSuccess" if metadata.get("repeat", 1) > 1 else "strRollCriticalSuccess",
+                "extreme_success": "strExtremeSuccess" if metadata.get("repeat", 1) > 1 else "strRollExtremeSuccess",
+                "hard_success": "strHardSuccess" if metadata.get("repeat", 1) > 1 else "strRollHardSuccess",
+                "regular_success": "strSuccess" if metadata.get("repeat", 1) > 1 else "strRollRegularSuccess",
+                "failure": "strFailure" if metadata.get("repeat", 1) > 1 else "strRollFailure",
+                "fumble": "strFumble" if metadata.get("repeat", 1) > 1 else "strRollFumble",
+            }.get(check.success_level, "strRollFailure")
+            results.append(
+                f"{self._render_check_roll(check)}/{check.target} "
+                f"{self.messages.render(result_key, values)}"
+            )
+        return header + ("\n" if len(results) > 1 else "") + "\n".join(results)
 
     @staticmethod
-    def _render_check(check: CheckResult, hidden: bool) -> str:
-        result = "隐藏" if hidden else str(check.roll.total)
-        return f"{result}/{check.target} {check.success_level}"
+    def _render_check_roll(check: CheckResult) -> str:
+        if len(check.roll.terms) == 1:
+            term = check.roll.terms[0]
+            if term.kind in {"bonus", "penalty"}:
+                label = "奖励骰" if term.kind == "bonus" else "惩罚骰"
+                detail = " ".join(str(value) for value in term.extra_tens)
+                return f"{term.notation}={term.base_roll}[{label}:{detail}]={term.subtotal}"
+        return check.roll.render()
+
+    @staticmethod
+    def _success_rank(success_level: str) -> int:
+        return {
+            "fumble": 0,
+            "failure": 1,
+            "regular_success": 1,
+            "hard_success": 3,
+            "extreme_success": 4,
+            "critical": 5,
+        }.get(success_level, 0)

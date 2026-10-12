@@ -12,6 +12,7 @@ from .errors import (
     UnknownCommandError,
 )
 from .commands import CommandRequest, CommandResponse, CommandRouter
+from .messages import DEFAULT_MESSAGES, MessageCatalog
 from .models import (
     ActorRef,
     CheckResult,
@@ -50,6 +51,7 @@ __all__ = [
     "CommandRequest",
     "CommandResponse",
     "CommandRouter",
+    "DEFAULT_MESSAGES",
     "Deck",
     "DeckEntry",
     "CheckResult",
@@ -67,6 +69,7 @@ __all__ = [
     "L5RDicePool",
     "L5RDie",
     "MessageContext",
+    "MessageCatalog",
     "MessageSource",
     "NicknameService",
     "NotFoundError",

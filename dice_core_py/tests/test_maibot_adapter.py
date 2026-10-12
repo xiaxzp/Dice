@@ -1,6 +1,10 @@
 import asyncio
+import json
+import re
+import runpy
 import tempfile
 import unittest
+from pathlib import Path
 
 from maibot_plugin.adapter import DiceCommandAdapter
 
@@ -12,6 +16,53 @@ class MaiBotAdapterTest(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_maibot_manifest_and_entrypoint_are_at_core_root(self):
+        root = Path(__file__).parents[1]
+        manifest = json.loads((root / "_manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["id"], "com.dice-developer.trpg-dice")
+        self.assertTrue((root / "plugin.py").is_file())
+
+    def test_plugin_config_contains_sdk_required_version_section(self):
+        try:
+            from maibot_plugin.plugin import DicePlugin
+        except ModuleNotFoundError as error:
+            if error.name == "maibot_sdk":
+                self.skipTest("maibot-plugin-sdk is only available in the MaiBot environment")
+            raise
+
+        config = DicePlugin.build_default_config()
+        self.assertEqual(config["plugin"]["config_version"], "2.0.0")
+
+    def test_plugin_declares_a_maibot_command_component(self):
+        try:
+            from maibot_plugin.plugin import DicePlugin
+        except ModuleNotFoundError as error:
+            if error.name == "maibot_sdk":
+                self.skipTest("maibot-plugin-sdk is only available in the MaiBot environment")
+            raise
+
+        info = getattr(DicePlugin.handle_command, "__maibot_component_info__")
+        self.assertEqual(info.name, "dice")
+        self.assertEqual(info.command_pattern, r"^[^\w\s]+(?=\S*\w)\S+(?:\s.*)?$")
+        pattern = re.compile(info.command_pattern)
+        self.assertIsNotNone(pattern.search(".r 1"))
+        self.assertIsNotNone(pattern.search(".r2#d6"))
+        self.assertIsNotNone(pattern.search(".rc3#50"))
+        self.assertIsNotNone(pattern.search("!!rc luck"))
+        self.assertIsNone(pattern.search("普通消息"))
+        self.assertIsNone(pattern.search("？！"))
+
+    def test_target_config_defaults_to_enabled(self):
+        config_path = Path(__file__).parents[1] / "config.toml"
+        if not config_path.exists():
+            self.skipTest("MaiBot runtime config is outside the source package")
+        self.assertIn("enabled = true", config_path.read_text(encoding="utf-8"))
+
+    def test_root_adapter_is_available_without_installing_core_package(self):
+        root = Path(__file__).parents[1]
+        namespace = runpy.run_path(str(root / "adapter.py"))
+        self.assertIn("DiceCommandAdapter", namespace)
 
     @staticmethod
     def message(text, *, group=True):
@@ -33,7 +84,7 @@ class MaiBotAdapterTest(unittest.TestCase):
         result = self.adapter.dispatch(self.message(".r 1"))
         self.assertTrue(result.handled)
         self.assertEqual(result.stream_id, "qq-group-42")
-        self.assertIn("群名片:", result.reply)
+        self.assertIn("群名片掷骰:", result.reply)
         self.assertEqual(result.response.command, "r")
 
     def test_pre_process_payload_reads_text_segments_before_text_processing(self):
@@ -47,7 +98,7 @@ class MaiBotAdapterTest(unittest.TestCase):
     def test_private_command_uses_private_source(self):
         result = self.adapter.dispatch(self.message("。st name50", group=False))
         self.assertTrue(result.handled)
-        self.assertIn("name", result.reply)
+        self.assertIn("录入", result.reply)
 
         follow_up = self.adapter.dispatch(self.message(".st show name", group=False))
         self.assertIn("50", follow_up.reply)

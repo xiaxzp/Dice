@@ -40,7 +40,7 @@ class CommandRouterTest(unittest.TestCase):
         self.assertEqual(response.command, "r")
         self.assertEqual(response.metadata["reason"], "伤害")
         self.assertEqual(response.result.request.reason, "伤害")
-        self.assertIn("测试用户:", response.rendered)
+        self.assertIn("测试用户掷骰 伤害:", response.rendered)
 
     def test_r_aliases_hidden_short_bonus_penalty_and_repeat(self):
         self.assertEqual(self.run_command("。rh d20").metadata["hidden"], True)
@@ -57,16 +57,33 @@ class CommandRouterTest(unittest.TestCase):
         self.assertEqual(repeated.metadata["repeat"], 2)
         self.assertEqual(len(repeated.result), 2)
 
-    def test_rc_ra_and_rcp_route_to_check_tools(self):
+    def test_rc_ra_rcb_and_rcp_route_to_check_tools(self):
         normal = self.run_command(".rc 50")
         bonus = self.run_command(".ra 50")
+        compact_bonus = self.run_command(".rcb 50")
         penalty = self.run_command(".rcp 50")
         self.assertEqual(normal.command, "rc")
         self.assertEqual(normal.metadata["target"], 50)
         self.assertEqual(bonus.metadata["target"], 50)
         self.assertEqual(penalty.metadata["target"], 50)
         self.assertEqual(bonus.metadata["mode"], "bonus")
+        self.assertEqual(compact_bonus.metadata["mode"], "bonus")
+        self.assertEqual(compact_bonus.metadata["bonus_dice"], 1)
+        self.assertEqual(compact_bonus.result.roll.normalized_expression, "B1")
         self.assertEqual(penalty.metadata["mode"], "penalty")
+        self.assertEqual(penalty.metadata["penalty_dice"], 1)
+        self.assertEqual(penalty.result.roll.normalized_expression, "P1")
+
+        two_bonus = self.run_command(".rcb2 50")
+        two_penalty = self.run_command(".rcp2 50")
+        self.assertEqual(two_bonus.metadata["bonus_dice"], 2)
+        self.assertEqual(two_bonus.result.roll.normalized_expression, "B2")
+        self.assertIn("B2=", two_bonus.rendered)
+        self.assertIn("[奖励骰:", two_bonus.rendered)
+        self.assertEqual(two_penalty.metadata["penalty_dice"], 2)
+        self.assertEqual(two_penalty.result.roll.normalized_expression, "P2")
+        self.assertIn("P2=", two_penalty.rendered)
+        self.assertIn("[惩罚骰:", two_penalty.rendered)
 
     def test_rc_reads_card_attributes_difficulty_and_hidden_mode(self):
         card = self.router.identities.characters.create(
@@ -81,7 +98,7 @@ class CommandRouterTest(unittest.TestCase):
         hidden = self.run_command(".rc _幸运")
         self.assertEqual(check.metadata["target"], 30)
         self.assertEqual(hidden.metadata["hidden"], True)
-        self.assertIn("隐藏", hidden.rendered)
+        self.assertIn("暗中", hidden.rendered)
 
     def test_coc_and_coc6_generate_and_bind_cards(self):
         generated = self.run_command(".coc6d")
@@ -102,6 +119,26 @@ class CommandRouterTest(unittest.TestCase):
         self.assertEqual(self.run_command(".st show 敏捷").result, {})
         self.run_command(".st clr")
         self.assertEqual(self.run_command(".st show").result, {})
+
+    def test_st_splits_adjacent_name_and_number_assignments(self):
+        self.run_command(".st 射击40斗殴50")
+        self.assertEqual(self.run_command(".st show 射击").result, {"射击": 40})
+        self.assertEqual(self.run_command(".st show 斗殴").result, {"斗殴": 50})
+
+    def test_st_hides_internal_statistics_from_attribute_lists(self):
+        self.run_command(".pc new stats")
+        self.run_command(".pc tag stats")
+        self.run_command(".r d100")
+        self.run_command(".rc 50")
+
+        shown = self.run_command(".st show")
+        listed = self.run_command(".st")
+        for response in (shown, listed):
+            self.assertNotIn("__StatD100Cnt", response.result)
+            self.assertNotIn("__StatRcCnt", response.result)
+            self.assertNotIn("__StatD100Cnt", response.rendered)
+            self.assertNotIn("__StatRcCnt", response.rendered)
+        self.assertGreater(self.run_command(".pc stat").result["dice"]["count"], 0)
 
     def test_sc_updates_san_and_ri_returns_initiative(self):
         self.run_command(".st san:50")

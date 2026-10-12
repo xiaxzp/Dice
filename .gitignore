@@ -54,5 +54,6 @@
 /dice_core_py/**/__pycache__/
 /dice_core_py/src/*.egg-info/
 /dice_core_py/data/
+/dice_core_py/config.toml
 *.DS_Store
 *.pyc

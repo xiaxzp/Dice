@@ -57,6 +57,12 @@ class CommandRouterTest(unittest.TestCase):
         self.assertEqual(repeated.metadata["repeat"], 2)
         self.assertEqual(len(repeated.result), 2)
 
+    def test_repeated_bonus_roll_interpolates_reason(self):
+        response = self.run_command(".r3#b hh")
+        self.assertEqual(response.metadata["reason"], "hh")
+        self.assertIn("hh", response.rendered)
+        self.assertNotIn("{reason}", response.rendered)
+
     def test_rc_ra_rcb_and_rcp_route_to_check_tools(self):
         normal = self.run_command(".rc 50")
         bonus = self.run_command(".ra 50")
@@ -100,13 +106,26 @@ class CommandRouterTest(unittest.TestCase):
         self.assertEqual(hidden.metadata["hidden"], True)
         self.assertIn("暗中", hidden.rendered)
 
-    def test_coc_and_coc6_generate_and_bind_cards(self):
+    def test_coc_generates_temporary_attributes_without_creating_or_binding_cards(self):
         generated = self.run_command(".coc6d")
         self.assertEqual(generated.metadata["variant"], 6)
         self.assertTrue(generated.metadata["detailed"])
-        self.assertEqual(generated.result.system, "COC6")
+        self.assertFalse(generated.metadata["persistent"])
+        self.assertIsInstance(generated.result, dict)
+        self.assertIn("力量", generated.result)
+        self.assertNotIn("__Type", generated.result)
+        self.assertEqual(self.router.identities.characters.list(self.context.actor), [])
         current = self.router.identities.characters.resolve(self.context)
-        self.assertEqual(current.card_id, generated.result.card_id)
+        self.assertIsNone(current)
+
+        self.run_command(".pc new investigator")
+        self.run_command(".pc tag investigator")
+        current = self.router.identities.characters.resolve(self.context)
+        self.run_command(".coc")
+        self.assertEqual(
+            self.router.identities.characters.resolve(self.context).card_id,
+            current.card_id,
+        )
 
     def test_st_can_set_show_increment_delete_and_clear(self):
         self.run_command(".st 力量:50 敏捷:40")

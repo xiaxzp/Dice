@@ -368,7 +368,7 @@ class CommandRouter:
                 )
         result: RollResponse | list[RollResponse] = responses[0] if repeat == 1 else responses
         if repeat > 1:
-            values = self._message_values(context, metadata)
+            values = self._message_values(context, {**metadata, "reason": reason or ""})
             if metadata.get("short"):
                 result_text = "{ " + ",".join(str(response.result.total) for response in responses) + " }"
             else:
@@ -401,6 +401,7 @@ class CommandRouter:
                         "turn": repeat,
                         "dice_exp": responses[0].result.normalized_expression,
                         "res": ", ".join(response.result.render() for response in responses),
+                        "reason": reason or "",
                     },
                 )
                 private_key = "strRollMultiDiceReason" if reason else "strRollMultiDice"
@@ -636,24 +637,22 @@ class CommandRouter:
             raise CommandError(".coc generation count must be in 1..10")
 
         display_name = self.identities.nicknames.resolve(context)
-        cards: list[CharacterCard] = []
+        generated: list[dict[str, Any]] = []
         for index in range(count):
             attributes = self._generate_coc_attributes(variant)
-            name = display_name if index == 0 else f"{display_name} {index + 1}"
-            name = self._unique_card_name(context, name)
-            card = self.identities.characters.create(
-                context.actor,
-                name,
-                system=f"COC{variant}",
-                attributes=attributes,
-            )
-            if index == 0:
-                self.identities.characters.bind(context.actor, context.source, card.card_id)
-            cards.append(card)
-        result: CharacterCard | list[CharacterCard] = cards[0] if count == 1 else cards
-        rendered = "\n".join(self._render_card(card, detailed) for card in cards)
+            generated.append(self._visible_attributes(attributes))
+        result: dict[str, Any] | list[dict[str, Any]] = generated[0] if count == 1 else generated
+        rendered = "\n".join(self._render_attributes(attributes) for attributes in generated)
         response_metadata = dict(metadata)
-        response_metadata.update({"variant": variant, "detailed": detailed, "count": count})
+        response_metadata.update(
+            {
+                "variant": variant,
+                "detailed": detailed,
+                "count": count,
+                "display_name": display_name,
+                "persistent": False,
+            }
+        )
         return CommandResponse("coc", args, result, rendered, response_metadata)
 
     def _handle_status(

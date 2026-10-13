@@ -9,8 +9,8 @@ if _BUNDLED_SOURCE.is_dir() and str(_BUNDLED_SOURCE) not in sys.path:
     sys.path.insert(0, str(_BUNDLED_SOURCE))
 
 try:
-    from .maibot_plugin.adapter import DEFAULT_PREFIXES, DiceCommandAdapter, DiceDispatch
+    from .maibot_plugin.adapter import DEFAULT_PREFIXES, DICE_COMMAND_PATTERN, DiceCommandAdapter, DiceDispatch
 except ImportError:
-    from maibot_plugin.adapter import DEFAULT_PREFIXES, DiceCommandAdapter, DiceDispatch
+    from maibot_plugin.adapter import DEFAULT_PREFIXES, DICE_COMMAND_PATTERN, DiceCommandAdapter, DiceDispatch
 
-__all__ = ["DEFAULT_PREFIXES", "DiceCommandAdapter", "DiceDispatch"]
+__all__ = ["DEFAULT_PREFIXES", "DICE_COMMAND_PATTERN", "DiceCommandAdapter", "DiceDispatch"]

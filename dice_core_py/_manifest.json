@@ -21,8 +21,17 @@
     "min_version": "2.0.0",
     "max_version": "2.99.99"
   },
-  "plugin_type": "adapter",
-  "capabilities": ["send_message"],
+  "plugin_type": "extension",
+  "capabilities": [
+    "send.text",
+    "send.forward",
+    "send.hybrid",
+    "emoji.get_random",
+    "config.get",
+    "person.get_id",
+    "person.get_id_by_name",
+    "person.get_value"
+  ],
   "i18n": {
     "default_locale": "zh-CN",
     "supported_locales": ["zh-CN"]

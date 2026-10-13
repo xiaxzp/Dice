@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-import sys
 from typing import Any, Awaitable, Callable, Mapping
 
+import re
+import sys
 
 _BUNDLED_SOURCE = Path(__file__).resolve().parents[1] / "src"
 if _BUNDLED_SOURCE.is_dir() and str(_BUNDLED_SOURCE) not in sys.path:
@@ -20,10 +21,24 @@ from trpg_dice import (
     MessageContext,
     MessageSource,
     ProfileRepository,
+    UnknownCommandError,
 )
+from trpg_dice.storage import JsonStore
 
 
 DEFAULT_PREFIXES = (".", "/", "。", "．", "!", "！")
+DICE_COMMAND_PATTERN = (
+    r"(?i)^[^\w\s]+\s*(?!rdc|rdx|rsr|rnc|rfc|rbh|rws)(?:"
+    r"bot(?=\s+(?:on|off)\s*$)|"
+    r"help|drawh?|name|nnn?|ob|setcoc|set|dnd|pc|init|ww?|me|jrrp|welcome|"
+    r"deck|rules?|log|game|ti|li|en|str|"
+    r"ak(?:[#=+\-][^\s]*)?|"
+    r"coc[67]?s?[\dd]*|"
+    r"(?:r(?:oll|h|s|d|b|p)?|rc[bp]?|ra|ri|st|sc)"
+    r"(?:[\dDdFfKkBbPpXx+*/().#_\-]|[^\x00-\x7f\s])*"
+    r")(?=\s|$)(?:\s[\s\S]*)?$"
+)
+_DICE_COMMAND_RE = re.compile(DICE_COMMAND_PATTERN)
 SendText = Callable[[str, str], Awaitable[Any]]
 
 
@@ -88,6 +103,17 @@ class DiceCommandAdapter:
         if not normalized_prefixes:
             raise ValueError("at least one command prefix is required")
         self.prefixes = normalized_prefixes
+        self._bot_state_store = JsonStore(data_dir)
+        self._bot_state_path = "config/bot_state.json"
+        state = self._bot_state_store.read(self._bot_state_path) or {}
+        disabled_groups = state.get("disabled_groups", {})
+        if not isinstance(disabled_groups, Mapping):
+            disabled_groups = {}
+        self._disabled_groups = {
+            str(group_key)
+            for group_key, disabled in disabled_groups.items()
+            if disabled
+        }
         self.platforms = (
             None
             if platforms is None
@@ -111,10 +137,25 @@ class DiceCommandAdapter:
             return DiceDispatch(handled=False)
 
         stream_id = payload["stream_id"]
-        context = self._build_context(payload, platform)
         command_text = self._normalize_prefix(text)
+        if _DICE_COMMAND_RE.fullmatch(command_text) is None:
+            return DiceDispatch(handled=False)
+        bot_operation = self._bot_operation(command_text)
+        if bot_operation is not None:
+            return self._dispatch_bot(
+                payload,
+                platform,
+                stream_id,
+                bot_operation,
+                self._build_context(payload, platform),
+            )
+        if payload["group_id"] and self._group_key(platform, payload["group_id"]) in self._disabled_groups:
+            return DiceDispatch(handled=False)
+        context = self._build_context(payload, platform)
         try:
             response = self.router.execute(context, command_text)
+        except UnknownCommandError:
+            return DiceDispatch(handled=False)
         except DiceError as error:
             return DiceDispatch(
                 handled=True,
@@ -127,6 +168,78 @@ class DiceCommandAdapter:
             reply=response.rendered,
             response=response,
         )
+
+    def _dispatch_bot(
+        self,
+        payload: Mapping[str, str],
+        platform: str,
+        stream_id: str,
+        operation: str,
+        context: MessageContext,
+    ) -> DiceDispatch:
+        if not payload["group_id"]:
+            return DiceDispatch(
+                handled=True,
+                stream_id=stream_id,
+                reply=self.router.messages.render(
+                    "strBotPrivate", self._message_values(context)
+                ),
+            )
+        group_key = self._group_key(platform, payload["group_id"])
+        disabled = group_key in self._disabled_groups
+        if operation == "off":
+            changed = not disabled
+            self._disabled_groups.add(group_key)
+            reply = self.router.messages.render(
+                "strBotOff" if changed else "strBotOffAlready",
+                self._message_values(context),
+            )
+        else:
+            changed = disabled
+            self._disabled_groups.discard(group_key)
+            reply = self.router.messages.render(
+                "strBotOn" if changed else "strBotOnAlready",
+                self._message_values(context),
+            )
+        self._save_bot_state()
+        return DiceDispatch(
+            handled=True,
+            stream_id=stream_id,
+            reply=reply,
+            response=CommandResponse(
+                "bot",
+                operation,
+                {"enabled": operation == "on", "changed": changed},
+                reply,
+                {"operation": operation, "group_id": payload["group_id"]},
+            ),
+        )
+
+    @staticmethod
+    def _bot_operation(command_text: str) -> str | None:
+        match = re.fullmatch(r"\.bot\s+(on|off)\s*", command_text, flags=re.IGNORECASE)
+        return match.group(1).casefold() if match else None
+
+    @staticmethod
+    def _group_key(platform: str, group_id: str) -> str:
+        return f"{platform.casefold()}:{group_id}"
+
+    def _save_bot_state(self) -> None:
+        self._bot_state_store.write(
+            self._bot_state_path,
+            {"disabled_groups": {group_key: True for group_key in sorted(self._disabled_groups)}},
+        )
+
+    def _message_values(self, context: MessageContext) -> dict[str, str]:
+        nickname = context.account_nickname or context.actor.user_id
+        return {
+            "nick": nickname,
+            "pc": nickname,
+            "self": self.router.messages.get("self"),
+            "uid": context.actor.user_id,
+            "platform": context.actor.platform,
+            "source": context.source.source_id,
+        }
 
     async def handle(
         self,

@@ -6,9 +6,9 @@ from typing import Any
 from maibot_sdk import Command, Field, MaiBotPlugin, PluginConfigBase
 
 try:
-    from .adapter import DEFAULT_PREFIXES, DiceCommandAdapter
+    from .adapter import DEFAULT_PREFIXES, DICE_COMMAND_PATTERN, DiceCommandAdapter
 except ImportError:
-    from adapter import DEFAULT_PREFIXES, DiceCommandAdapter
+    from adapter import DEFAULT_PREFIXES, DICE_COMMAND_PATTERN, DiceCommandAdapter
 
 
 class PluginSectionConfig(PluginConfigBase):
@@ -68,7 +68,7 @@ class DicePlugin(MaiBotPlugin):
     @Command(
         "dice",
         description="处理 .、/、。等前缀的 TRPG 骰子指令",
-        pattern=r"^[^\w\s]+(?=\S*\w)\S+(?:\s.*)?$",
+        pattern=DICE_COMMAND_PATTERN,
     )
     async def handle_command(self, **kwargs: Any) -> tuple[bool, str, int]:
         message = kwargs.get("message")

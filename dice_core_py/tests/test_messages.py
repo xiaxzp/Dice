@@ -69,7 +69,7 @@ class CommandMessageTest(unittest.TestCase):
     def test_repeated_roll_uses_multi_message(self):
         response = self.router.execute(self.context, ".r2#d6")
         self.assertIn("掷骰2次", response.rendered)
-        self.assertIn("d6", response.rendered)
+        self.assertIn("D6", response.rendered)
 
     def test_hidden_roll_keeps_private_render(self):
         response = self.router.execute(self.context, ".rh d6")

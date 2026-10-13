@@ -527,7 +527,7 @@ response = router.dispatch(request)
 | `.coc6` | 临时生成一组 COC6 属性，不保存人物卡 |
 | `.coc6d` | 临时生成一组 COC6 详细属性，不保存人物卡 |
 
-数量范围为 `1..10`。`.coc` 只返回本次生成的属性，不会创建或绑定 `.pc` 人物卡；需要保存人物卡时请使用 `.pc new`、`.pc build` 和 `.pc tag`。生成属性包括力量、体质、体型、敏捷、外貌、意志、教育、智力、幸运、生命、理智/SAN、魔法、闪避、灵感和知识。
+数量范围为 `1..10`。`.coc` 只返回本次生成的属性，不会创建或绑定 `.pc` 人物卡；需要保存人物卡时请使用 `.pc new`、`.pc build` 和 `.pc tag`。COC7 结果末尾会输出 `共计:不含幸运/含幸运`，结构化结果对应 `不含幸运合计` 和 `含幸运合计` 字段。生成属性包括力量、体质、体型、敏捷、外貌、意志、教育、智力、幸运、生命、理智/SAN、魔法、闪避、灵感和知识。
 
 ### `.st` 属性记录总入口
 
@@ -583,6 +583,9 @@ response = router.dispatch(request)
 | `.w`、`.ww` | 已实现 | 10 面骰池和详细骰点结果 | `test_command_manual_coverage.py` |
 | `.me`、`.jrrp`、`.welcome` | 已实现 | 结构化动作、每日人品和欢迎词状态 | `test_command_manual_coverage.py` |
 | `.draw`、`.deck` | 已实现 | 公共/自定义牌堆抽取、删除、重置、清空和 range 牌堆 | `test_command_manual_coverage.py`、`test_deck.py` |
+
+自定义牌堆支持 `.deck new 名称=卡面1|卡面2`，也支持空格写法
+`.deck new 名称 卡面1|卡面2`。仅提供一个名称时，会创建同名牌面。
 | `.ak` | 已实现 | 分歧的新建、增删选项、随机抽取和清空 | `test_command_manual_coverage.py` |
 | `.rule`、`.rules`、`.log` | 核心状态已实现 | 规则别名/默认项和日志状态可持久化；规则词库、日志文件上传由适配器提供 | `test_command_manual_coverage.py` |
 | `.game` | 已实现 | 会话生命周期、GM/PL、设置、轮盘骰及历史状态 | `test_command_manual_coverage.py`、`test_session.py` |

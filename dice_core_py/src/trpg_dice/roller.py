@@ -279,6 +279,12 @@ class DiceRoller:
             terms=tuple(evaluation.terms),
         )
 
+    def maximum(self, expression: str = "") -> int:
+        node = _Parser(expression, self.default_sides, self.limits).parse()
+        _, value = self._extrema(node)
+        self._validate_total(value)
+        return value
+
     def randint(self, lower: int, upper: int) -> int:
         if lower > upper:
             raise ValueError("lower must not exceed upper")
@@ -315,15 +321,26 @@ class DiceRoller:
         pending = count
         explosions = 0
         rolls: list[int] = []
+        groups: list[tuple[int, ...]] = []
+        success_groups: list[int] = []
         while pending:
-            pending -= 1
-            value = self.rng.randint(1, sides)
-            rolls.append(value)
-            if explode_at is not None and value >= explode_at:
-                explosions += 1
-                if explosions > max_explosions:
-                    raise DiceLimitError("dice pool exceeded max_explosions")
-                pending += 1
+            group_count = pending
+            group_rolls: list[int] = []
+            pending = 0
+            while group_count:
+                group_count -= 1
+                value = self.rng.randint(1, sides)
+                group_rolls.append(value)
+                rolls.append(value)
+                if explode_at is not None and value >= explode_at:
+                    explosions += 1
+                    if explosions > max_explosions:
+                        raise DiceLimitError("dice pool exceeded max_explosions")
+                    pending += 1
+            group_successes = sum(value >= target for value in group_rolls)
+            if group_successes or not groups:
+                groups.append(tuple(group_rolls))
+                success_groups.append(group_successes)
         successes = sum(value >= target for value in rolls)
         return PoolResult(
             count=count,
@@ -332,6 +349,8 @@ class DiceRoller:
             explode_at=explode_at,
             rolls=tuple(rolls),
             successes=successes,
+            groups=tuple(groups),
+            success_groups=tuple(success_groups),
         )
 
     def coc_check(
@@ -380,6 +399,46 @@ class DiceRoller:
             return self._roll_percentile(node, evaluation)
         if isinstance(node, _Dice):
             return self._roll_dice(node, evaluation)
+        raise TypeError(f"unsupported node: {type(node)!r}")
+
+    def _extrema(self, node: _Node) -> tuple[int, int]:
+        if isinstance(node, _Number):
+            return node.value, node.value
+        if isinstance(node, _Unary):
+            minimum, maximum = self._extrema(node.operand)
+            return (minimum, maximum) if node.operator == "+" else (-maximum, -minimum)
+        if isinstance(node, _Binary):
+            left_minimum, left_maximum = self._extrema(node.left)
+            right_minimum, right_maximum = self._extrema(node.right)
+            if node.operator == "+":
+                return left_minimum + right_minimum, left_maximum + right_maximum
+            if node.operator == "-":
+                return left_minimum - right_maximum, left_maximum - right_minimum
+            if node.operator == "*":
+                values = (
+                    left_minimum * right_minimum,
+                    left_minimum * right_maximum,
+                    left_maximum * right_minimum,
+                    left_maximum * right_maximum,
+                )
+                return min(values), max(values)
+            divisors = {right_minimum, right_maximum}
+            if right_minimum <= 0 <= right_maximum:
+                raise DivisionByZeroError("cannot divide by zero")
+            values = tuple(
+                (abs(left) // abs(right)) * (-1 if (left < 0) != (right < 0) else 1)
+                for left in (left_minimum, left_maximum)
+                for right in divisors
+            )
+            return min(values), max(values)
+        if isinstance(node, _Dice):
+            if node.fate:
+                return -node.count, node.count
+            assert node.sides is not None
+            keep = node.keep if node.keep is not None else node.count
+            return keep, keep * node.sides
+        if isinstance(node, _Percentile):
+            return 1, 100
         raise TypeError(f"unsupported node: {type(node)!r}")
 
     def _roll_dice(self, node: _Dice, evaluation: _Evaluation) -> int:

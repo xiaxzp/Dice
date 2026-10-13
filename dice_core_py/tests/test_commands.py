@@ -12,6 +12,7 @@ from trpg_dice import (
     MessageSource,
     ProfileRepository,
     SeededRandomSource,
+    SequenceRandomSource,
     UnknownCommandError,
 )
 
@@ -63,6 +64,12 @@ class CommandRouterTest(unittest.TestCase):
         self.assertIn("hh", response.rendered)
         self.assertNotIn("{reason}", response.rendered)
 
+    def test_c_style_roll_rendering_matches_complete_and_multi_roll_shapes(self):
+        response = self.run_command(".r 2d6+3")
+        self.assertRegex(response.rendered, r"2D6\+3\=\d+\+\d+\+3\=\d+\+3\=\d+")
+        repeated = self.run_command(".r2#2d6")
+        self.assertRegex(repeated.rendered, r"2D6=\d+\+\d+=\d+, \d+\+\d+=\d+")
+
     def test_rc_ra_rcb_and_rcp_route_to_check_tools(self):
         normal = self.run_command(".rc 50")
         bonus = self.run_command(".ra 50")
@@ -106,6 +113,21 @@ class CommandRouterTest(unittest.TestCase):
         self.assertEqual(hidden.metadata["hidden"], True)
         self.assertIn("暗中", hidden.rendered)
 
+    def test_w_and_ww_use_c_style_pool_rendering(self):
+        short = self.run_command(".w 2a8")
+        detailed = self.run_command(".ww 2a8")
+        self.assertIn("掷骰: 2a8=", short.rendered)
+        self.assertIn("掷骰: 2a8={", detailed.rendered)
+        self.assertEqual(short.metadata["target"], 8)
+        self.assertEqual(short.metadata["explode_at"], 8)
+        self.assertNotIn("成功数：", short.rendered)
+
+        repeated = self.run_command(".ww2#2a10")
+        hidden = self.run_command(".wwh 2a8")
+        self.assertEqual(repeated.metadata["repeat"], 2)
+        self.assertIn("private_rendered", hidden.metadata)
+        self.assertIn("暗骰", hidden.rendered)
+
     def test_coc_generates_temporary_attributes_without_creating_or_binding_cards(self):
         generated = self.run_command(".coc6d")
         self.assertEqual(generated.metadata["variant"], 6)
@@ -127,6 +149,36 @@ class CommandRouterTest(unittest.TestCase):
             current.card_id,
         )
 
+    def test_coc7_reports_totals_without_and_with_luck(self):
+        generated = self.run_command(".coc")
+        without_luck = sum(
+            generated.result[name]
+            for name in ("力量", "体质", "体型", "敏捷", "外貌", "智力", "意志", "教育")
+        )
+        with_luck = without_luck + generated.result["幸运"]
+        self.assertEqual(generated.result["不含幸运合计"], without_luck)
+        self.assertEqual(generated.result["含幸运合计"], with_luck)
+        self.assertIn(f"共计:{without_luck}/{with_luck}", generated.rendered)
+
+    def test_coc_output_matches_original_simple_and_detailed_shapes(self):
+        simple_coc7 = self.run_command(".coc")
+        self.assertIn("的调查员作成:\n力量:", simple_coc7.rendered)
+        self.assertIn(" 共计:", simple_coc7.rendered)
+
+        simple_coc6 = self.run_command(".coc6")
+        self.assertIn("的调查员作成:\n力量:", simple_coc6.rendered)
+        self.assertIn("共计:", simple_coc6.rendered)
+        self.assertIn("资产:", simple_coc6.rendered)
+
+        detailed_coc7 = self.run_command(".cocd")
+        self.assertIn("力量STR=3D6*5=", detailed_coc7.rendered)
+        self.assertIn("伤害奖励DB=", detailed_coc7.rendered)
+        self.assertIn("移动力MOV=", detailed_coc7.rendered)
+
+        detailed_coc6 = self.run_command(".coc6d")
+        self.assertIn("力量STR=3D6=", detailed_coc6.rendered)
+        self.assertIn("资产=1D10=", detailed_coc6.rendered)
+
     def test_st_can_set_show_increment_delete_and_clear(self):
         self.run_command(".st 力量:50 敏捷:40")
         self.run_command(".st 幸运50")
@@ -135,9 +187,76 @@ class CommandRouterTest(unittest.TestCase):
         self.run_command(".st 力量+5")
         self.assertEqual(self.run_command(".st show 力量").result, {"力量": 55})
         self.run_command(".st del 敏捷")
-        self.assertEqual(self.run_command(".st show 敏捷").result, {})
+        with self.assertRaisesRegex(CommandError, "属性敏捷不存在"):
+            self.run_command(".st show 敏捷")
         self.run_command(".st clr")
         self.assertEqual(self.run_command(".st show").result, {})
+
+    def test_st_matches_original_help_missing_card_and_rendering(self):
+        self.assertIn("属性记录", self.run_command(".st").rendered)
+        with self.assertRaisesRegex(CommandError, "角色卡记录"):
+            self.run_command(".st show")
+        with self.assertRaisesRegex(CommandError, "角色卡记录"):
+            self.run_command(".st clr")
+
+        self.run_command(".pc new investigator")
+        self.run_command(".pc tag investigator")
+        self.run_command(".st 敏捷:50 力量:60")
+        shown = self.run_command(".st show")
+        self.assertLess(shown.rendered.index("力量:60"), shown.rendered.index("敏捷:50"))
+        self.assertIn("闪避:25", shown.rendered)
+        with self.assertRaisesRegex(CommandError, "属性幸运不存在"):
+            self.run_command(".st del 幸运")
+
+    def test_nickname_initiative_and_pc_subcommands_use_original_templates(self):
+        self.assertIn("称呼", self.run_command(".nn").rendered)
+        self.assertIn("人物卡管理", self.run_command(".pc").rendered)
+        self.assertIn("先攻", self.run_command(".init").rendered)
+        self.assertIn("没有保存先攻表", self.run_command(".init show").rendered)
+
+        self.run_command(".nn keeper")
+        deleted = self.run_command(".nn del")
+        self.assertIn("keeper", deleted.rendered)
+        self.assertNotIn("True", deleted.rendered)
+
+        self.run_command(".pc new source")
+        self.run_command(".pc tag source")
+        copied = self.run_command(".pc cpy copy=source")
+        self.assertIn("已将「source」的属性复制到「copy」", copied.rendered)
+        self.assertIn("各群角色列表", self.run_command(".pc grp").rendered)
+        self.assertIn("模板类", self.run_command(".pc type").rendered)
+        self.assertIn("<COC7>source", self.run_command(".pc tojson").rendered)
+
+    def test_stateful_command_outputs_match_original_boundaries(self):
+        for command, keyword in (
+            (".ob", "旁观状态"),
+            (".game", "跑团会话"),
+            (".deck", "抽牌和牌堆"),
+            (".draw", "抽牌和牌堆"),
+            (".ak", "安价分歧"),
+            (".log", "日志状态"),
+        ):
+            with self.subTest(command=command):
+                self.assertIn(keyword, self.run_command(command).rendered)
+
+        self.run_command(".game new table")
+        self.run_command(".ob join")
+        self.assertIn(self.context.actor.user_id, self.run_command(".ob list").rendered)
+        self.run_command(".ob exit")
+        self.assertIn("暂无旁观者", self.run_command(".ob clr").rendered)
+
+        self.assertIn("清除失败", self.run_command(".welcome clr").rendered)
+        self.run_command(".deck new cards=A|B")
+        drawn = self.run_command(".draw cards 2")
+        self.assertRegex(drawn.rendered, r"(?:A\|B|B\|A)")
+        with self.assertRaisesRegex(CommandError, "没听说过"):
+            self.run_command(".draw missing")
+        with self.assertRaisesRegex(CommandError, "没听说过"):
+            self.run_command(".deck show missing")
+
+        self.run_command(".ak new choice")
+        self.run_command(".ak add yes|no")
+        self.assertRegex(self.run_command(".ak get").rendered, r"选择：[12]\. ")
 
     def test_st_splits_adjacent_name_and_number_assignments(self):
         self.run_command(".st 射击40斗殴50")
@@ -166,13 +285,48 @@ class CommandRouterTest(unittest.TestCase):
         initiative = self.run_command(".ri+2 2#调查员")
         self.assertEqual(initiative.metadata["offset"], 2)
         self.assertEqual(len(initiative.result), 2)
+        self.assertIn("D20+2=", initiative.rendered)
 
         fixed = self.run_command(".ri 17 boss")
         self.assertEqual(fixed.result, [{"name": "boss", "value": 17}])
         self.assertEqual(fixed.metadata["explicit_value"], 17)
+        self.assertTrue(fixed.rendered.endswith("17"))
 
         expression = self.run_command(".ri d20 boss")
         self.assertEqual(expression.metadata["expression"], "d20")
+
+    def test_set_matches_original_bounds_and_errors(self):
+        self.assertEqual(self.run_command(".set 9999").result["default_sides"], 9999)
+        with self.assertRaisesRegex(CommandError, "默认骰不能为零"):
+            self.run_command(".set 0")
+        for value in ("10000", "not-a-number"):
+            with self.subTest(value=value), self.assertRaisesRegex(
+                CommandError, "1-9999"
+            ):
+                self.run_command(f".set {value}")
+
+    def test_madness_uses_complete_distinct_fear_and_mania_tables(self):
+        self.router = CommandRouter(
+            DiceEngine(
+                self.router.identities,
+                DiceRoller(SequenceRandomSource([9, 1, 100])),
+            )
+        )
+        fear = self.run_command(".ti")
+        self.assertEqual(fear.result["detail_roll"], "1D100=100")
+        self.assertIn("动物恐惧症（Zoophobia）", fear.rendered)
+        self.assertIn("守秘人也可以自行从恐惧症状表中选择其他症状", fear.rendered)
+
+        self.router = CommandRouter(
+            DiceEngine(
+                self.router.identities,
+                DiceRoller(SequenceRandomSource([10, 2, 100])),
+            )
+        )
+        mania = self.run_command(".li")
+        self.assertEqual(mania.result["detail_roll"], "1D100=100")
+        self.assertIn("喜兽癖（Zoomania）", mania.rendered)
+        self.assertIn("KP也可以自行从躁狂症状表中选择其他症状", mania.rendered)
 
     def test_help_custom_commands_and_input_validation(self):
         help_response = self.run_command(".help rc")

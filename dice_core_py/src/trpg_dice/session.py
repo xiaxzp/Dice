@@ -89,8 +89,6 @@ class DiceSession:
         return existed
 
     def add_observer(self, actor: ActorRef) -> bool:
-        if actor in self.game_masters or actor in self.players:
-            return False
         existed = actor in self.observers
         self.observers.add(actor)
         self.touch()

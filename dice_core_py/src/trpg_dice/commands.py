@@ -10,10 +10,12 @@ from typing import Any, Callable
 
 from .engine import DiceEngine
 from .errors import CommandError, IdentityError, UnknownCommandError
+from .insanity import FEARS, LONG_INSANITY, MANIAS, TEMPORARY_INSANITY
 from .models import (
     CheckResult,
     DiceTermResult,
     MessageContext,
+    PoolResult,
     RollRequest,
     RollResponse,
     RollResult,
@@ -24,47 +26,6 @@ from .roller import DiceRoller, coc_success_level
 from .session import DiceSession
 from .special import Deck, DeckEntry, Roulette
 
-
-_TEMPORARY_INSANITY = (
-    "",
-    "失忆：在{dur}轮之内，{pc}会发现自己只记得最后身处的安全地点，却没有任何来到这里的记忆。",
-    "假性残疾：{pc}陷入了心理性的失明、失聪或躯体缺失感中，持续{dur}轮。",
-    "暴力倾向：{pc}陷入了六亲不认的暴力行为中，对周围的敌人与友方进行着无差别的攻击，持续{dur}轮。",
-    "偏执：{pc}陷入了严重的偏执妄想之中。有人在暗中窥视着他们，同伴中有人背叛了他们，没有人可以信任，万事皆虚。持续{dur}轮。",
-    "人际依赖：{pc}因为一些原因而将他人误认为了他重要的人并且努力的会与那个人保持那种关系，持续{dur}轮。",
-    "昏厥：{pc}当场昏倒，昏迷状态持续{dur}轮。",
-    "逃避行为：{pc}会用任何的手段试图逃离现在所处的位置，状态持续{dur}轮。",
-    "竭嘶底里：{pc}表现出大笑，哭泣，嘶吼，害怕等的极端情绪表现，持续{dur}轮。",
-    "恐惧：{pc}陷入对某一事物的恐惧之中，持续{dur}轮。\n{detail_roll}\n具体恐惧症：{detail}",
-    "躁狂：{pc}由于某种诱因进入躁狂状态，症状持续{dur}轮。\n{detail_roll}\n具体躁狂症：{detail}",
-)
-
-_LONG_INSANITY = (
-    "",
-    "失忆：在{dur}小时后，{pc}回过神来，发现自己身处一个陌生的地方，并忘记了自己是谁。记忆会随时间恢复。",
-    "被窃：{pc}在{dur}小时后恢复清醒，发觉自己被盗，身体毫发无损。",
-    "遍体鳞伤：{pc}在{dur}小时后恢复清醒，发现自己身上满是拳痕和瘀伤。生命值减少到疯狂前的一半。",
-    "暴力倾向：{pc}陷入强烈的暴力与破坏欲之中，持续{dur}小时。",
-    "极端信念：在{dur}小时之内，{pc}会采取极端和疯狂的表现手段展示他们的思想信念之一。",
-    "重要之人：在{dur}小时中，{pc}将不顾一切地接近重要的那个人，并为关系做出行动。",
-    "被收容：{dur}小时后，{pc}在精神病院病房或警察局牢房中回过神来。",
-    "逃避行为：{dur}小时后，{pc}恢复清醒时发现自己在很远的地方。",
-    "恐惧：{pc}患上一个新的恐惧症，会在{dur}小时后恢复正常。\n{detail_roll}\n具体恐惧症：{detail}",
-    "躁狂：{pc}患上一个新的躁狂症，在{dur}小时后恢复理智。\n{detail_roll}\n具体躁狂症：{detail}",
-)
-
-_INSANITY_DETAILS = (
-    "洗澡恐惧症：对于洗涤或洗澡的恐惧。",
-    "恐高症：对于身处高处的恐惧。",
-    "幽闭恐惧症：对于处在封闭空间中的恐惧。",
-    "恐犬症：对狗的恐惧。",
-    "恐水症：对水的恐惧。",
-    "恐惧黑暗：对黑暗或夜晚的恐惧。",
-    "人群恐惧症：对于人群的恐惧。",
-    "恐蛇症：对蛇的恐惧。",
-    "恐火症：对火的恐惧。",
-    "恐惧死亡：对死亡或尸体的恐惧。",
-)
 
 _PUBLIC_DECKS = {
     "数字": tuple(str(value) for value in range(10)),
@@ -265,6 +226,23 @@ class CommandRouter:
             operation = lower[2]
             value = body[3:].strip() if len(body) > 3 else ""
             return _ParsedCommand("ak", f"{operation} {value}".strip(), {})
+        pool_match = re.match(r"^(ww|w)(h)?(?=\d+#)(.*)$", lower, flags=re.DOTALL)
+        if pool_match:
+            command = pool_match.group(1)
+            prefix_length = len(command) + bool(pool_match.group(2))
+            return _ParsedCommand(
+                command,
+                body[prefix_length:].strip(),
+                {"detailed": command == "ww", "hidden": bool(pool_match.group(2))},
+            )
+        if lower.startswith("wwh ") or lower.startswith("wh "):
+            command = "ww" if lower.startswith("wwh ") else "w"
+            prefix_length = 3 if command == "ww" else 2
+            return _ParsedCommand(
+                command,
+                body[prefix_length:].strip(),
+                {"detailed": command == "ww", "hidden": True},
+            )
         for command in ("authorize", "dismiss", "reply", "welcome", "rules", "rule", "group", "game", "jrrp", "init", "name", "send", "deck", "draw", "dnd", "pc", "ob", "set", "nnn", "nn", "log", "bot", "me", "ti", "li", "en", "ww", "w", "ak"):
             if lower == command or lower.startswith(command + " "):
                 return _ParsedCommand(command, body[len(command):].strip(), {"detailed": command == "ww"})
@@ -372,11 +350,14 @@ class CommandRouter:
             if metadata.get("short"):
                 result_text = "{ " + ",".join(str(response.result.total) for response in responses) + " }"
             else:
-                result_text = ", ".join(response.result.render() for response in responses)
+                result_text = ", ".join(
+                    response.result.render_c_value(detailed=True)
+                    for response in responses
+                )
             values.update(
                 {
                     "turn": repeat,
-                    "dice_exp": responses[0].result.normalized_expression,
+                    "dice_exp": responses[0].result.render_c().split("=", 1)[0],
                     "res": result_text,
                 }
             )
@@ -399,8 +380,11 @@ class CommandRouter:
                     context,
                     {
                         "turn": repeat,
-                        "dice_exp": responses[0].result.normalized_expression,
-                        "res": ", ".join(response.result.render() for response in responses),
+                        "dice_exp": responses[0].result.render_c().split("=", 1)[0],
+                        "res": ", ".join(
+                            response.result.render_c_value(detailed=True)
+                            for response in responses
+                        ),
                         "reason": reason or "",
                     },
                 )
@@ -446,7 +430,9 @@ class CommandRouter:
         if sides not in session.roulettes:
             return None
         value = session.roll(sides)
-        session.data.setdefault("roulette_history", []).append(value)
+        session.data.setdefault("roulette_history", []).append(
+            {"sides": sides, "value": value}
+        )
         normalized = self.roller.normalize(expression)
         term = DiceTermResult(
             notation=normalized,
@@ -638,11 +624,23 @@ class CommandRouter:
 
         display_name = self.identities.nicknames.resolve(context)
         generated: list[dict[str, Any]] = []
-        for index in range(count):
+        rendered_items: list[str] = []
+        for _ in range(count):
             attributes = self._generate_coc_attributes(variant)
-            generated.append(self._visible_attributes(attributes))
+            generated.append(attributes)
+            rendered_items.append(self._render_coc_attributes(attributes, variant, detailed, count))
         result: dict[str, Any] | list[dict[str, Any]] = generated[0] if count == 1 else generated
-        rendered = "\n".join(self._render_attributes(attributes) for attributes in generated)
+        rendered_body = "".join(f"\n{item}" for item in rendered_items)
+        rendered = self.messages.render(
+            "strCOCBuild",
+            self._message_values(
+                context,
+                {
+                    "pc": display_name,
+                    "res": rendered_body,
+                },
+            ),
+        )
         response_metadata = dict(metadata)
         response_metadata.update(
             {
@@ -660,36 +658,45 @@ class CommandRouter:
     ) -> CommandResponse:
         body = args.strip()
         card = self.identities.characters.resolve(context)
+        if not body:
+            help_response = self._handle_help(context, "st", {"command": "help"})
+            return CommandResponse("st", args, {}, help_response.rendered)
         if body.casefold() == "show" or body.casefold().startswith("show "):
-            requested = ""
             if card is None:
-                result: dict[str, Any] = {}
-            else:
-                requested = body[4:].strip()
-                if not requested:
-                    result = self._visible_attributes(card.attributes)
-                else:
-                    key = self._attribute_key(card.attributes, requested)
-                    result = {} if key not in card.attributes else {requested: card.attributes[key]}
-            if not result:
-                rendered = self._render_attributes(result)
-            elif requested:
+                raise CommandError(
+                    self.messages.render("strPcNotExistErr", self._message_values(context))
+                )
+            requested = body[4:].strip()
+            if requested:
+                key = self._attribute_key(card.attributes, requested)
+                if key not in card.attributes:
+                    raise CommandError(
+                        self.messages.render(
+                            "strPropNotFound",
+                            self._message_values(context, {"attr": requested}),
+                        )
+                    )
+                result = {requested: card.attributes[key]}
                 rendered = self.messages.render(
                     "strProp",
                     self._message_values(context, {"attr": requested, "val": next(iter(result.values()))}),
                 )
             else:
+                result = self._visible_attributes(card.attributes)
                 rendered = self.messages.render(
                     "strPropList",
                     self._message_values(
                         context,
-                        {"char": card.name if card else self.identities.nicknames.resolve(context), "show": self._render_attributes(result)},
+                        {"char": card.name, "show": self._render_card_attributes(card)},
                     ),
                 )
             return CommandResponse("st", args, result, rendered)
 
-        card = card or self._ensure_card(context)
         if body.casefold() == "clr":
+            if card is None:
+                raise CommandError(
+                    self.messages.render("strPcNotExistErr", self._message_values(context))
+                )
             updated = self.identities.characters.update(context.actor, card.card_id, attributes={})
             return CommandResponse(
                 "st",
@@ -701,10 +708,22 @@ class CommandRouter:
                 ),
             )
         if body.casefold().startswith("del "):
+            if card is None:
+                raise CommandError(
+                    self.messages.render("strPcNotExistErr", self._message_values(context))
+                )
             names = body[4:].split()
             attributes = dict(card.attributes)
             for name in names:
-                attributes.pop(self._attribute_key(attributes, name), None)
+                key = self._attribute_key(attributes, name)
+                if key not in attributes:
+                    raise CommandError(
+                        self.messages.render(
+                            "strPropNotFound",
+                            self._message_values(context, {"attr": name}),
+                        )
+                    )
+                attributes.pop(key)
             updated = self.identities.characters.update(
                 context.actor, card.card_id, attributes=attributes
             )
@@ -717,10 +736,7 @@ class CommandRouter:
                     self._message_values(context, {"attr": "、".join(names)}),
                 ),
             )
-        if not body:
-            result = self._visible_attributes(card.attributes)
-            return CommandResponse("st", args, result, self._render_attributes(result))
-
+        card = card or self._ensure_card(context)
         attributes = dict(card.attributes)
         changed: dict[str, Any] = {}
         for token in self._split_status_assignments(body):
@@ -775,11 +791,18 @@ class CommandRouter:
         if current is None:
             raise CommandError(".sc requires current san or 理智")
         roll = self._roll_session_die(context, "d100") or self.roller.roll("d100")
-        success = roll.total <= current
-        loss = self._evaluate_attribute_expression(
-            success_loss if success else failure_loss, card.attributes
-        )
-        remaining = current - loss
+        rule = int(self._session_for(context).data.get("coc_rule", 0))
+        success_level = coc_success_level(roll.total, current, rule)
+        success = success_level not in {"failure", "fumble"}
+        loss_expression = success_loss if success else failure_loss
+        if success_level == "fumble":
+            loss = self.roller.maximum(loss_expression)
+            change_text = f"Max{{{self.roller.normalize(loss_expression).upper()}}}={loss}"
+        else:
+            loss_result = self.roller.roll(loss_expression)
+            loss = loss_result.total
+            change_text = loss_result.render_c()
+        remaining = max(0, current - loss)
         attributes = dict(card.attributes)
         san_key = self._attribute_key(attributes, "san")
         if san_key == "san" and "理智" in attributes:
@@ -797,9 +820,6 @@ class CommandRouter:
             "remaining": remaining,
             "card": updated,
         }
-        from .roller import coc_success_level
-
-        success_level = coc_success_level(roll.total, current, int(self._session_for(context).data.get("coc_rule", 0)))
         rank = self._success_rank(success_level)
         card_name = self.identities.nicknames.resolve(context)
         rendered = self.messages.render(
@@ -811,7 +831,7 @@ class CommandRouter:
                     "res": f"1D100={roll.total}/{current}",
                     "rank": rank,
                     "loss": loss,
-                    "change": loss,
+                    "change": change_text,
                     "final": remaining,
                     "current": current,
                     "nick": card_name,
@@ -846,27 +866,36 @@ class CommandRouter:
             else:
                 name = body
         entries = []
+        roll_renderings: list[str] = []
         for index in range(repeat):
-            value = (
-                explicit_value
-                if explicit_value is not None
-                else self.roller.roll(expression).total
-            )
+            if explicit_value is not None:
+                value = explicit_value + offset
+                roll_renderings.append(str(value))
+            else:
+                roll_expression = expression if offset == 0 else f"{expression}{offset:+d}"
+                roll = self.roller.roll(roll_expression)
+                value = roll.total
+                roll_renderings.append(roll.render_c())
             entries.append(
                 {
                     "name": name if repeat == 1 else f"{name}{index + 1}",
-                    "value": value + offset,
+                    "value": value,
                 }
             )
         session = self._session_for(context)
         session.data["initiative"] = list(session.data.get("initiative", [])) + entries
         entries.sort(key=lambda item: item["value"], reverse=True)
-        rendered = "\n".join(f"{entry['name']}: {entry['value']}" for entry in entries)
+        result_text = roll_renderings[0]
+        if repeat > 1:
+            result_text = "\n" + "\n".join(
+                f"{index}. {rendering}"
+                for index, rendering in enumerate(roll_renderings, start=1)
+            )
         rendered = self.messages.render(
             "strRollInit",
             self._message_values(
                 context,
-                {"char": name, "res": "\n".join(f"{entry['name']}: {entry['value']}" for entry in entries)},
+                {"char": name, "res": result_text},
             ),
         )
         return CommandResponse(
@@ -887,7 +916,7 @@ class CommandRouter:
         commands = {
             "r": "普通骰：.r [表达式] [原因]",
             "ob": "旁观状态：.ob join/exit/list/clr/on/off",
-            "set": "默认骰面数：.set [1..1000]",
+            "set": "默认骰面数：.set [1..9999]",
             "name": "随机昵称：.name [cn|jp|en] [数量]",
             "nn": "称呼：.nn [昵称|del|clr]，.nnn [cn|jp|en]",
             "rc": "COC检定：.rc [困难/极难][属性或表达式] [成功率]",
@@ -949,7 +978,10 @@ class CommandRouter:
         self, context: MessageContext, args: str, metadata: dict[str, Any]
     ) -> CommandResponse:
         session = self._session_for(context)
-        operation = args.strip().casefold() or "join"
+        operation = args.strip().casefold()
+        if not operation:
+            help_response = self._handle_help(context, "ob", {"command": "help"})
+            return CommandResponse("ob", args, {}, help_response.rendered)
         if operation == "join":
             changed = session.add_observer(context.actor)
             result = {"joined": changed, "observers": [item.to_dict() for item in session.observers]}
@@ -960,20 +992,44 @@ class CommandRouter:
             result = {"exited": changed, "observers": [item.to_dict() for item in session.observers]}
             rendered = self.messages.render("strObExit", self._message_values(context)) if changed else self.messages.render("strObExitAlready", self._message_values(context))
         elif operation == "list":
+            if not session.data.get("game_active", False):
+                raise CommandError(
+                    self.messages.render("strGameVoidHere", self._message_values(context))
+                )
             result = [item.to_dict() for item in sorted(session.observers, key=lambda item: item.key)]
             if result:
-                rendered = self.messages.render("strObList", self._message_values(context, {"res": "\n".join(item["user_id"] for item in result)}))
+                rendered = self.messages.render(
+                    "strObList", self._message_values(context)
+                ) + "\n" + "\n".join(item["user_id"] for item in result)
             else:
                 rendered = self.messages.render("strObListEmpty", self._message_values(context))
         elif operation == "clr":
+            if not session.data.get("game_active", False):
+                raise CommandError(
+                    self.messages.render("strGameVoidHere", self._message_values(context))
+                )
+            had_observers = bool(session.observers)
             session.observers.clear()
             result = []
-            rendered = self.messages.render("strObListClr", self._message_values(context))
-        elif operation in {"on", "off"}:
-            session.data["observer_enabled"] = operation == "on"
-            result = {"enabled": session.data["observer_enabled"]}
             rendered = self.messages.render(
-                "strObOn" if operation == "on" else "strObOff",
+                "strObListClr" if had_observers else "strObListEmpty",
+                self._message_values(context),
+            )
+        elif operation in {"on", "off"}:
+            if not session.data.get("game_active", False):
+                raise CommandError(
+                    self.messages.render("strGameVoidHere", self._message_values(context))
+                )
+            enabled = session.data.get("observer_enabled", True)
+            changed = enabled != (operation == "on")
+            session.data["observer_enabled"] = operation == "on"
+            result = {"enabled": session.data["observer_enabled"], "changed": changed}
+            rendered = self.messages.render(
+                (
+                    "strObOn" if operation == "on" and changed else
+                    "strObOnAlready" if operation == "on" else
+                    "strObOff" if changed else "strObOffAlready"
+                ),
                 self._message_values(context),
             )
         else:
@@ -985,35 +1041,87 @@ class CommandRouter:
     ) -> CommandResponse:
         session = self._session_for(context)
         parts = args.strip().split(maxsplit=1)
-        operation = parts[0].casefold() if parts else "state"
+        if not parts:
+            help_response = self._handle_help(context, "game", {"command": "help"})
+            return CommandResponse("game", args, {}, help_response.rendered)
+        operation = parts[0].casefold()
         value = parts[1].strip() if len(parts) == 2 else ""
         if operation == "new":
             session.sources.clear()
             session.game_masters.clear()
             session.players.clear()
             session.observers.clear()
+            session.roulettes.clear()
+            session.decks.clear()
             session.data.clear()
             session.data["name"] = value or session.session_id
+            session.data["game_id"] = session.data["name"]
+            session.data["game_active"] = True
             session.add_source(context.source)
             session.add_gm(context.actor)
-            return CommandResponse("game", args, {"session_id": session.session_id, "created": True}, "已创建新的跑团会话")
+            return CommandResponse(
+                "game",
+                args,
+                {"session_id": session.session_id, "created": True},
+                self.messages.render(
+                    "strGameNew",
+                    self._message_values(context, {"game_id": session.data["game_id"]}),
+                ),
+            )
         if operation == "master":
             changed = session.add_gm(context.actor)
-            return CommandResponse("game", args, {"changed": changed}, "已成为主持人" if changed else "你已经是主持人")
+            if changed:
+                rendered = self.messages.render("strGameMastered", self._message_values(context))
+                result: Any = {"changed": True}
+            else:
+                masters = sorted(session.game_masters, key=lambda item: item.key)
+                result = {"changed": False, "masters": [item.to_dict() for item in masters]}
+                rendered = self.messages.render(
+                    "strGameMasterList",
+                    self._message_values(
+                        context,
+                        {"items": "\n".join(item.user_id for item in masters)},
+                    ),
+                )
+            return CommandResponse("game", args, result, rendered)
         if operation == "join":
             changed = session.add_player(context.actor)
-            return CommandResponse("game", args, {"changed": changed}, "已加入跑团" if changed else "你已经加入跑团")
+            rendered = self.messages.render(
+                "strGameJoined" if changed else "strGamePlayerAlready",
+                self._message_values(context),
+            )
+            return CommandResponse("game", args, {"changed": changed}, rendered)
         if operation == "exit":
             changed = session.remove_player(context.actor) or session.remove_gm(context.actor)
-            return CommandResponse("game", args, {"changed": changed}, "已退出跑团" if changed else "你不在跑团中")
+            rendered = self.messages.render(
+                "strGameExited" if changed else "strGameNotJoined",
+                self._message_values(context),
+            )
+            return CommandResponse("game", args, {"changed": changed}, rendered)
         if operation in {"close", "over"}:
+            game_id = str(session.data.get("game_id", session.data.get("name", session.session_id)))
             session.data["closed"] = True
-            return CommandResponse("game", args, {"closed": True}, "跑团会话已关闭")
+            session.data["game_active"] = False
+            rendered = self.messages.render(
+                "strGameAreaClosed" if operation == "close" else "strGameOver",
+                self._message_values(context, {"game_id": game_id}),
+            )
+            return CommandResponse("game", args, {"closed": True}, rendered)
         if operation == "open":
             session.data["closed"] = False
+            session.data["game_active"] = True
             if value:
                 session.data["game_id"] = value
-            return CommandResponse("game", args, {"closed": False}, "跑团会话已打开")
+            game_id = str(session.data.get("game_id", session.data.get("name", session.session_id)))
+            return CommandResponse(
+                "game",
+                args,
+                {"closed": False},
+                self.messages.render(
+                    "strGameAreaOpen",
+                    self._message_values(context, {"game_id": game_id}),
+                ),
+            )
         if operation == "set":
             if "=" not in value:
                 raise CommandError(".game set expects key=value")
@@ -1023,29 +1131,75 @@ class CommandRouter:
             except json.JSONDecodeError:
                 parsed = item
             session.data[key] = parsed
-            return CommandResponse("game", args, {key: parsed}, f"已设置跑团参数：{key}={parsed}")
+            return CommandResponse(
+                "game",
+                args,
+                {key: parsed},
+                self.messages.render(
+                    "strGameItemSet",
+                    self._message_values(context, {"set_item": key, "set_val": parsed}),
+                ),
+            )
         if operation == "call":
             players = sorted(session.players, key=lambda item: item.key)
             result = [actor.to_dict() for actor in players]
-            return CommandResponse("game", args, result, "\n".join(actor.user_id for actor in players) or "没有已加入的玩家")
+            rendered = self.messages.render(
+                "strGamePlayerCall" if players else "strGamePlayerEmpty",
+                self._message_values(context, {"items": "\n".join(actor.user_id for actor in players)}),
+            )
+            return CommandResponse("game", args, result, rendered)
         if operation == "state":
             result = session.to_dict()
-            return CommandResponse("game", args, result, json.dumps(result, ensure_ascii=False, sort_keys=True))
+            return CommandResponse("game", args, result, self._render_game_state(context, session))
         if operation == "rou":
+            if not session.data.get("game_active", False):
+                raise CommandError(
+                    self.messages.render("strGameVoidHere", self._message_values(context))
+                )
             rou_parts = value.split()
             action = rou_parts[0].casefold() if rou_parts else "show"
             if action in {"clr", "reset"}:
                 if action == "clr":
                     session.roulettes.clear()
                     session.data.pop("roulette_history", None)
-                    return CommandResponse("game", args, {}, "轮盘骰已清空")
+                    return CommandResponse(
+                        "game", args, {}, self.messages.render("strGameRouletteClear", self._message_values(context))
+                    )
                 for roulette in session.roulettes.values():
                     roulette.reset()
                 session.data["roulette_history"] = []
-                return CommandResponse("game", args, session.to_dict()["roulettes"], "轮盘骰已重置")
+                return CommandResponse(
+                    "game", args, session.to_dict()["roulettes"],
+                    self.messages.render("strGameRouletteReset", self._message_values(context)),
+                )
             if action == "hist":
                 history = list(session.data.get("roulette_history", []))
-                return CommandResponse("game", args, history, "\n".join(map(str, history)) or "轮盘骰暂无记录")
+                grouped: dict[int, list[int]] = {}
+                for item in history:
+                    if isinstance(item, dict):
+                        sides = int(item["sides"])
+                        value = int(item["value"])
+                    else:
+                        sides = next(
+                            (sides for sides in session.roulettes if int(item) <= sides),
+                            0,
+                        )
+                        value = int(item)
+                    if sides:
+                        grouped.setdefault(sides, []).append(value)
+                rendered = self.messages.render(
+                    "strGameRouletteHistory" if history else "strGameRouletteEmpty",
+                    self._message_values(
+                        context,
+                        {
+                            "hist": "\n".join(
+                                f"D{sides}=" + " ".join(map(str, values))
+                                for sides, values in sorted(grouped.items())
+                            )
+                        },
+                    ),
+                )
+                return CommandResponse("game", args, history, rendered)
             match = re.fullmatch(r"(\d+)(?:\*(\d+))?", action)
             if match:
                 sides = int(match.group(1))
@@ -1054,10 +1208,20 @@ class CommandRouter:
                     raise CommandError(".game rou requires positive sides/copies with total at most 100")
                 roulette = session.configure_roulette(sides, copies)
                 session.data["roulette_history"] = []
-                return CommandResponse("game", args, roulette.to_dict(), f"已设置{copies}组D{sides}轮盘骰")
+                return CommandResponse(
+                    "game", args, roulette.to_dict(),
+                    self.messages.render(
+                        "strGameRouletteSet",
+                        self._message_values(context, {"face": sides}),
+                    ),
+                )
             if action == "show":
                 result = {str(sides): roulette.to_dict() for sides, roulette in session.roulettes.items()}
-                return CommandResponse("game", args, result, json.dumps(result, ensure_ascii=False, sort_keys=True))
+                rendered = self.messages.render(
+                    "strGameRouletteHistory" if result else "strGameRouletteEmpty",
+                    self._message_values(context, {"hist": self._render_roulette_list(result)}),
+                )
+                return CommandResponse("game", args, result, rendered)
             raise CommandError(".game rou expects sides[*copies], hist, clr, reset, or show")
         raise CommandError(f"unknown .game operation: {operation}")
 
@@ -1079,9 +1243,17 @@ class CommandRouter:
         try:
             sides = int(value)
         except ValueError as error:
-            raise CommandError(".set expects a number between 1 and 1000") from error
-        if not 1 <= sides <= 1000:
-            raise CommandError(".set expects a number between 1 and 1000")
+            raise CommandError(
+                self.messages.render("strSetTooBig", self._message_values(context))
+            ) from error
+        if sides == 0:
+            raise CommandError(
+                self.messages.render("strSetCannotBeZero", self._message_values(context))
+            )
+        if not 1 <= sides <= 9999:
+            raise CommandError(
+                self.messages.render("strSetTooBig", self._message_values(context))
+            )
         card = self.identities.characters.resolve(context)
         if card is None:
             self.identities.settings.set(context.actor, "default_dice", f"d{sides}")
@@ -1115,8 +1287,20 @@ class CommandRouter:
         kind = next((part.casefold() for part in parts if part.casefold() in {"cn", "jp", "en"}), "all")
         count_text = next((part for part in parts if part.isdigit()), "1")
         count = int(count_text)
-        if not 1 <= count <= 10:
-            raise CommandError(".name count must be in 1..10")
+        if count > 10:
+            raise CommandError(
+                self.messages.render(
+                    "strNameNumTooBig",
+                    self._message_values(context),
+                )
+            )
+        if count == 0:
+            raise CommandError(
+                self.messages.render(
+                    "strNameNumCannotBeZero",
+                    self._message_values(context),
+                )
+            )
         result = self._random_names(kind, count)
         return CommandResponse(
             "name",
@@ -1135,18 +1319,35 @@ class CommandRouter:
         body = args.strip()
         if metadata.get("command") == "nnn":
             body = self._random_names(body.casefold() or "all", 1)[0]
+        elif not body:
+            help_response = self._handle_help(context, "nn", {"command": "help"})
+            return CommandResponse("nn", args, {}, help_response.rendered)
         if body.casefold() == "clr":
+            old_nick = self.identities.nicknames.resolve(context)
             result = self.identities.nicknames.clear(context.actor)
-            return CommandResponse("nn", args, result, self.messages.render("strNameClr", self._message_values(context, {"old_nick": ""})))
-        if body.casefold() == "del" or not body:
+            return CommandResponse("nn", args, result, self.messages.render("strNameClr", self._message_values(context, {"old_nick": old_nick})))
+        if body.casefold() == "del":
             source = None if context.source.kind == "private" else context.source
+            old_nick = self.identities.nicknames.resolve(context)
             result = self.identities.nicknames.remove(context.actor, source)
-            return CommandResponse("nn", args, result, self.messages.render("strNameDel", self._message_values(context, {"old_nick": result or ""})))
+            return CommandResponse(
+                "nn",
+                args,
+                result,
+                self.messages.render(
+                    "strNameDel" if result else "strNameDelEmpty",
+                    self._message_values(context, {"old_nick": old_nick}),
+                ),
+            )
         if body.casefold() == "nnn" or body.casefold().startswith("nnn "):
             kind = body[3:].strip().casefold() or "all"
             body = self._random_names(kind, 1)[0]
         elif body.casefold().startswith("n "):
             body = body[2:].strip()
+        if len(body.encode("utf-8")) > 50:
+            raise CommandError(
+                self.messages.render("strNameTooLongErr", self._message_values(context))
+            )
         source = None if context.source.kind == "private" else context.source
         old_nick = self.identities.nicknames.resolve(context)
         result = self.identities.nicknames.set(context.actor, body, source)
@@ -1163,71 +1364,167 @@ class CommandRouter:
     def _handle_dnd(
         self, context: MessageContext, args: str, metadata: dict[str, Any]
     ) -> CommandResponse:
-        count = int(args.strip() or "1")
-        if not 1 <= count <= 10:
-            raise CommandError(".dnd generation count must be in 1..10")
+        try:
+            count = int(args.strip() or "1")
+        except ValueError as error:
+            raise CommandError(
+                self.messages.render("strCharacterInvalid", self._message_values(context))
+            ) from error
+        if count > 10:
+            raise CommandError(
+                self.messages.render("strBuildTooMany", self._message_values(context))
+            )
+        if count == 0:
+            raise CommandError(
+                self.messages.render("strCharacterCannotBeZero", self._message_values(context))
+            )
         display_name = self.identities.nicknames.resolve(context)
-        cards = []
+        generated: list[dict[str, Any]] = []
         for index in range(count):
             attributes = {name: self.roller.roll("4d6k3").total for name in ("力量", "敏捷", "体质", "智力", "感知", "魅力")}
-            name = self._unique_card_name(context, display_name if index == 0 else f"{display_name} {index + 1}")
-            card = self.identities.characters.create(context.actor, name, system="DND", attributes=attributes)
-            if index == 0:
-                self.identities.characters.bind(context.actor, context.source, card.card_id)
-            cards.append(card)
-        result = cards[0] if count == 1 else cards
-        return CommandResponse("dnd", args, result, "\n".join(self._render_card(card, False) for card in cards), {"count": count})
+            generated.append(attributes)
+        result: dict[str, Any] | list[dict[str, Any]] = generated[0] if count == 1 else generated
+        rendered = self.messages.render(
+            "strDNDBuild",
+            self._message_values(
+                context,
+                {"res": "\n" + self._render_dnd_cards(generated)},
+            ),
+        )
+        return CommandResponse("dnd", args, result, rendered, {"count": count})
 
     def _handle_pc(
         self, context: MessageContext, args: str, metadata: dict[str, Any]
     ) -> CommandResponse:
         parts = args.split(maxsplit=1)
-        operation = parts[0].casefold() if parts else "show"
+        if not parts:
+            help_response = self._handle_help(context, "pc", {"command": "help"})
+            return CommandResponse("pc", args, {}, help_response.rendered)
+        operation = parts[0].casefold()
         value = parts[1].strip() if len(parts) == 2 else ""
         current = self.identities.characters.resolve(context)
         if operation == "new":
             name = value or self.identities.nicknames.resolve(context)
             card = self.identities.characters.create(context.actor, self._unique_card_name(context, name), system="COC7")
-            return CommandResponse("pc", args, card, self._render_card(card, True))
+            return CommandResponse(
+                "pc", args, card,
+                self.messages.render(
+                    "strPcNewEmptyCard",
+                    self._message_values(context, {"type": card.system, "char": card.name}),
+                ),
+            )
         if operation == "list":
             cards = self.identities.characters.list(context.actor)
-            return CommandResponse("pc", args, cards, "\n".join(self._render_card(card, False) for card in cards))
+            listed = [
+                f"[{card.card_id}]<{card.system}>{card.name}" for card in cards
+            ]
+            listed.insert(0, "[0]<COC7>角色卡")
+            listed.append("default:角色卡")
+            return CommandResponse(
+                "pc", args, cards,
+                self.messages.render(
+                    "strPcCardList",
+                    self._message_values(
+                        context,
+                        {"show": "\n".join(listed)},
+                    ),
+                ),
+            )
         if operation == "grp":
             profile = self.identities.repository.load(context.actor)
             result = dict(profile.bindings)
-            return CommandResponse("pc", args, result, str(result))
+            cards = profile.cards
+            lines = []
+            for scope, card_id in result.items():
+                card = cards.get(card_id)
+                if card is not None:
+                    lines.append(
+                        f"default:{card.name}" if scope == "global" else f"({scope}){card.name}"
+                    )
+            return CommandResponse(
+                "pc",
+                args,
+                result,
+                self.messages.render(
+                    "strPcGroupList",
+                    self._message_values(context, {"show": "\n".join(lines)}),
+                ),
+            )
         if operation == "show":
             card = self._card_by_ref(context, value) if value else current
             result = card.to_dict() if card else {}
-            return CommandResponse("pc", args, result, self._render_card(card, True) if card else "无当前人物卡")
+            display_card = card or CharacterCard("0", "角色卡", "COC7")
+            rendered = (
+                self.messages.render(
+                    "strPcCardShow",
+                    self._message_values(
+                        context,
+                        {
+                            "type": display_card.system,
+                            "char": display_card.name,
+                            "show": self._render_card_attributes(display_card),
+                        },
+                    ),
+                )
+            )
+            return CommandResponse("pc", args, result, rendered)
         if operation == "tag":
             if not value:
                 source = None if context.source.kind == "private" else context.source
                 self.identities.characters.unbind(context.actor, source)
-                return CommandResponse("pc", args, {}, "已解除当前绑定")
+                return CommandResponse(
+                    "pc", args, {},
+                    self.messages.render("strPcCardReset", self._message_values(context)),
+                )
             card = self._card_by_ref(context, value)
             if context.source.kind == "private":
                 self.identities.characters.bind_global(context.actor, card.card_id)
             else:
                 self.identities.characters.bind(context.actor, context.source, card.card_id)
-            return CommandResponse("pc", args, card, f"已绑定：{card.name}")
+            return CommandResponse(
+                "pc", args, card,
+                self.messages.render(
+                    "strPcCardSet", self._message_values(context, {"char": card.name})
+                ),
+            )
         if operation == "clr":
             cards = self.identities.characters.list(context.actor)
+            if not cards:
+                raise CommandError(
+                    self.messages.render("strPcNotExistErr", self._message_values(context))
+                )
             for card in cards:
                 self.identities.characters.delete(context.actor, card.card_id)
-            return CommandResponse("pc", args, len(cards), "人物卡已清空")
+            return CommandResponse(
+                "pc", args, len(cards),
+                self.messages.render("strPcClr", self._message_values(context)),
+            )
         if operation == "stat":
             return self._render_card_statistics(context, args, current)
         if operation == "type":
             if not value:
-                result = {"attr": "模板类", "val": current.system if current else "generic"}
-                return CommandResponse("pc", args, result, f"模板类：{result['val']}")
+                result = {"attr": "模板类", "val": current.system if current else "COC7"}
+                return CommandResponse(
+                    "pc",
+                    args,
+                    result,
+                    self.messages.render(
+                        "strProp",
+                        self._message_values(context, result),
+                    ),
+                )
             if current is None:
                 raise CommandError("no current character card")
             updated = self.identities.characters.update(
                 context.actor, current.card_id, system=value
             )
-            return CommandResponse("pc", args, updated, f"人物卡模板已修改为：{value}")
+            return CommandResponse(
+                "pc", args, updated,
+                self.messages.render(
+                    "strPcTempChange",
+                    self._message_values(context, {"pc": current.name, "new_type": value}),
+                ),
+            )
         if operation == "temp":
             if current is None:
                 raise CommandError("no current character card")
@@ -1236,9 +1533,23 @@ class CommandRouter:
         if operation == "tojson":
             card = self._card_by_ref(context, value) if value else current
             if card is None:
-                return CommandResponse("pc", args, {}, "无当前人物卡")
+                raise CommandError(
+                    self.messages.render("strPcNotExistErr", self._message_values(context))
+                )
             result = card.to_dict()
-            return CommandResponse("pc", args, result, json.dumps(result, ensure_ascii=False, sort_keys=True))
+            rendered_json = json.dumps(result, ensure_ascii=False, sort_keys=True)
+            return CommandResponse(
+                "pc",
+                args,
+                result,
+                self.messages.render(
+                    "strPcCardShow",
+                    self._message_values(
+                        context,
+                        {"type": card.system, "char": card.name, "show": rendered_json},
+                    ),
+                ),
+            )
         if operation == "cpy":
             if "=" in value:
                 destination, target = (item.strip() for item in value.split("=", 1))
@@ -1254,23 +1565,55 @@ class CommandRouter:
                 system=source.system,
                 attributes=source.attributes,
             )
-            return CommandResponse("pc", args, card, self._render_card(card, True))
+            return CommandResponse(
+                "pc",
+                args,
+                card,
+                self.messages.render(
+                    "strPcCardCpy",
+                    self._message_values(
+                        context, {"char1": card.name, "char2": source.name}
+                    ),
+                ),
+            )
         if operation in {"build", "redo"} and value:
             current = self._card_by_ref(context, value)
         if current is None:
             raise CommandError("no current character card")
         if operation == "nn":
             card = self.identities.characters.rename(context.actor, current.card_id, value)
-            return CommandResponse("pc", args, card, f"已重命名：{card.name}")
+            return CommandResponse(
+                "pc", args, card,
+                self.messages.render(
+                    "strPcCardRename",
+                    self._message_values(context, {"old_name": current.name, "new_name": card.name}),
+                ),
+            )
         if operation == "del":
             card = self._card_by_ref(context, value) if value else current
             self.identities.characters.delete(context.actor, card.card_id)
-            return CommandResponse("pc", args, {}, "人物卡已删除")
+            return CommandResponse(
+                "pc", args, {},
+                self.messages.render("strPcCardDel", self._message_values(context, {"char": card.name})),
+            )
         if operation in {"build", "redo"}:
             attributes = {} if operation == "redo" else dict(current.attributes)
             attributes.update(self._generate_coc_attributes(7))
             card = self.identities.characters.update(context.actor, current.card_id, attributes=attributes)
-            return CommandResponse("pc", args, card, self._render_card(card, True))
+            key = "strPcCardRedo" if operation == "redo" else "strPcCardBuild"
+            return CommandResponse(
+                "pc", args, card,
+                self.messages.render(
+                    key,
+                    self._message_values(
+                        context,
+                        {
+                            "char": card.name,
+                            "show": self._render_card_attributes(card),
+                        },
+                    ),
+                ),
+            )
         raise CommandError(f"unknown .pc operation: {operation}")
 
     def _render_card_statistics(
@@ -1280,14 +1623,22 @@ class CommandRouter:
         card: CharacterCard | None,
     ) -> CommandResponse:
         if card is None:
-            return CommandResponse("pc", args, {}, "暂无掷骰统计")
+            return CommandResponse(
+                "pc", args, {},
+                self.messages.render("strPcStatEmpty", self._message_values(context)),
+            )
         face = self._default_sides(card)
         attributes = card.attributes
         dice_key = f"__StatD{face}"
         count = int(attributes.get(f"{dice_key}Cnt", 0))
         checks = int(attributes.get("__StatRcCnt", 0))
         if count <= 0 and checks <= 0:
-            return CommandResponse("pc", args, {}, "暂无掷骰统计")
+            return CommandResponse(
+                "pc", args, {},
+                self.messages.render(
+                    "strPcStatEmpty", self._message_values(context, {"pc": card.name})
+                ),
+            )
         result: dict[str, Any] = {"dice": {}, "checks": {}}
         lines: list[str] = []
         if count > 0 and face <= 100:
@@ -1332,7 +1683,11 @@ class CommandRouter:
             lines.append(
                 f"1 | 100 出现数：{result['checks']['one']} | {result['checks']['hundred']}"
             )
-        return CommandResponse("pc", args, result, "\n".join(lines))
+        rendered = self.messages.render(
+            "strPcStatShow",
+            self._message_values(context, {"pc": card.name, "stat": "\n".join(lines)}),
+        )
+        return CommandResponse("pc", args, result, rendered)
 
     @staticmethod
     def _default_sides(card: CharacterCard) -> int:
@@ -1356,18 +1711,36 @@ class CommandRouter:
         value = args.strip().casefold()
         if value == "show" or not value:
             rule = int(session.data.get("coc_rule", 0))
-            return CommandResponse("setcoc", args, rule, f"当前COC房规：{rule}")
+            return CommandResponse(
+                "setcoc",
+                args,
+                rule,
+                self.messages.render(
+                    "strDefaultCOCShowDefault" if rule == 0 else "strDefaultCOCShow",
+                    self._message_values(context, {"rule": rule}),
+                ),
+            )
         if value == "clr":
             session.data.pop("coc_rule", None)
-            return CommandResponse("setcoc", args, 0, "已清除COC房规")
+            return CommandResponse(
+                "setcoc", args, 0,
+                self.messages.render("strDefaultCOCClr", self._message_values(context)),
+            )
         try:
             rule = int(value)
         except ValueError as error:
             raise CommandError(".setcoc expects 0..6, show, or clr") from error
         if not 0 <= rule <= 6:
-            raise CommandError(".setcoc rule must be in 0..6")
+            raise CommandError(
+                self.messages.render("strDefaultCOCNotFound", self._message_values(context))
+            )
         session.data["coc_rule"] = rule
-        return CommandResponse("setcoc", args, rule, f"COC房规已设置为：{rule}")
+        return CommandResponse(
+            "setcoc", args, rule,
+            self.messages.render(
+                "strDefaultCOCSet", self._message_values(context, {"rule": rule})
+            ) + str(rule),
+        )
 
     def _handle_madness(
         self, context: MessageContext, args: str, metadata: dict[str, Any]
@@ -1378,20 +1751,22 @@ class CommandRouter:
         details: dict[str, Any] = {}
         if symptom_roll in {9, 10}:
             detail_roll = self.roller.roll("d100").total
+            detail_table = FEARS if symptom_roll == 9 else MANIAS
             details = {
                 "detail_roll": f"1D100={detail_roll}",
-                "detail": _INSANITY_DETAILS[(detail_roll - 1) % len(_INSANITY_DETAILS)],
+                "detail": detail_table[detail_roll],
             }
-        template = (_TEMPORARY_INSANITY if temporary else _LONG_INSANITY)[symptom_roll]
+        template = (TEMPORARY_INSANITY if temporary else LONG_INSANITY)[symptom_roll]
         symptom = template.format(
             pc=self.identities.characters.resolve(context).name
             if self.identities.characters.resolve(context)
             else self.identities.nicknames.resolve(context),
             nick=self.identities.nicknames.resolve(context),
-            dur=duration_roll,
+            dur=f"1D10={duration_roll}",
             detail_roll=details.get("detail_roll", ""),
             detail=details.get("detail", ""),
         )
+        symptom = f"1D10={symptom_roll}\n症状: {symptom}"
         result = {
             "type": "temporary" if temporary else "indefinite",
             "roll": symptom_roll,
@@ -1439,7 +1814,7 @@ class CommandRouter:
         elif change_expression:
             success_expression = change_expression
         roll = self._roll_session_die(context, "d100") or self.roller.roll("d100")
-        success = roll.total > current
+        success = roll.total > current or roll.total >= 96
         change = 0
         if success:
             change = self._evaluate_attribute_expression(success_expression, card.attributes)
@@ -1499,32 +1874,169 @@ class CommandRouter:
         self, context: MessageContext, args: str, metadata: dict[str, Any]
     ) -> CommandResponse:
         session = self._session_for(context)
-        if args.strip().casefold() == "clr":
-            session.data["initiative"] = []
-            return CommandResponse("init", args, [], "先攻列表已清空")
-        entries = sorted(session.data.get("initiative", []), key=lambda item: item["value"], reverse=True)
-        return CommandResponse("init", args, entries, "\n".join(f"{item['name']}: {item['value']}" for item in entries))
+        operation = args.strip()
+        if not operation:
+            help_response = self._handle_help(context, "ri/init", {"command": "help"})
+            return CommandResponse("init", args, {}, help_response.rendered)
+        if operation.casefold() == "clr":
+            if "initiative" not in session.data:
+                return CommandResponse(
+                    "init", args, [],
+                    self.messages.render(
+                        "strGMTableNotExist",
+                        self._message_values(context, {"table_name": "先攻"}),
+                    ),
+                )
+            session.data.pop("initiative", None)
+            return CommandResponse(
+                "init", args, [],
+                self.messages.render(
+                    "strGMTableClr",
+                    self._message_values(context, {"table_name": "先攻"}),
+                ),
+            )
+        if operation.casefold().startswith("del"):
+            target = operation[3:].strip()
+            if not target:
+                raise CommandError(
+                    self.messages.render(
+                        "strGMTableItemEmpty",
+                        self._message_values(context, {"table_name": "先攻"}),
+                    )
+                )
+            if "initiative" not in session.data:
+                return CommandResponse(
+                    "init", args, [],
+                    self.messages.render(
+                        "strGMTableNotExist",
+                        self._message_values(context, {"table_name": "先攻"}),
+                    ),
+                )
+            entries = list(session.data.get("initiative", []))
+            retained = [item for item in entries if item["name"] != target]
+            if len(retained) == len(entries):
+                raise CommandError(
+                    self.messages.render(
+                        "strGMTableItemNotFound",
+                        self._message_values(
+                            context, {"table_name": "先攻", "table_item": target}
+                        ),
+                    )
+                )
+            session.data["initiative"] = retained
+            return CommandResponse(
+                "init", args, target,
+                self.messages.render(
+                    "strGMTableItemDel",
+                    self._message_values(
+                        context, {"table_name": "先攻", "table_item": target}
+                    ),
+                ),
+            )
+        if operation.casefold() not in {"show", "list"}:
+            help_response = self._handle_help(context, "ri/init", {"command": "help"})
+            return CommandResponse("init", args, {}, help_response.rendered)
+        if "initiative" not in session.data:
+            return CommandResponse(
+                "init", args, [],
+                self.messages.render(
+                    "strGMTableNotExist",
+                    self._message_values(context, {"table_name": "先攻"}),
+                ),
+            )
+        entries = sorted(
+            session.data["initiative"],
+            key=lambda item: (item["value"], item["name"]),
+            reverse=True,
+        )
+        result = "".join(
+            f"\n{index}.{item['name']}: {item['value']}"
+            for index, item in enumerate(entries, start=1)
+        )
+        return CommandResponse(
+            "init", args, entries,
+            self.messages.render(
+                "strGMTableShow",
+                self._message_values(context, {"table_name": "先攻", "res": result}),
+            ),
+        )
 
     def _handle_pool(
         self, context: MessageContext, args: str, metadata: dict[str, Any]
     ) -> CommandResponse:
-        body = args.strip()
-        match = re.fullmatch(r"(\d+)\s*a\s*(\d+)?", body, flags=re.IGNORECASE)
+        repeat, body = self._split_repeat(args)
+        expression, reason = self._split_roll_reason(body)
+        match = re.fullmatch(r"(\d+)(?:\s*a\s*(\d+)?)?", expression, flags=re.IGNORECASE)
         if match:
             count = int(match.group(1))
-            target = int(match.group(2) or 8)
+            explode_at = int(match.group(2) or 10)
+            notation = f"{count}" + (f"a{explode_at}" if "a" in expression.casefold() else "D")
         else:
             card = self.identities.characters.resolve(context)
             if card is None:
                 raise CommandError(".w expects [count]a[target] or a card expression")
-            count = self._evaluate_attribute_expression(body, card.attributes)
-            target = 8
-        result = self.roller.pool(count, target=target)
-        if metadata.get("detailed"):
-            rendered = f"{list(result.rolls)} -> {result.successes}个成功"
+            count = self._evaluate_attribute_expression(expression, card.attributes)
+            explode_at = 10
+            notation = f"{count}D"
+        if not 5 <= explode_at <= 11:
+            raise CommandError("dice pool explosion threshold must be in 5..11")
+        card = self.identities.characters.resolve(context)
+        session = self._session_for(context)
+        target = int(
+            session.data.get(
+                "__DPTarget",
+                card.attributes.get("__DPTarget", 8) if card is not None else 8,
+            )
+        )
+        results = [
+            self.roller.pool(count, target=target, explode_at=explode_at)
+            for _ in range(repeat)
+        ]
+        display_name = card.name if card is not None else self.identities.nicknames.resolve(context)
+        values = self._message_values(
+            context,
+            {
+                "pc": display_name,
+                "reason": reason or "",
+                "turn": repeat,
+                "dice_exp": notation,
+            },
+        )
+        detailed = bool(metadata.get("detailed"))
+        if repeat > 1 and not detailed:
+            values["res"] = "{ " + ",".join(str(result.successes) for result in results) + " }"
+            rendered = self.messages.render(
+                "strRollMultiDiceReason" if reason else "strRollMultiDice",
+                values,
+            )
         else:
-            rendered = f"成功数：{result.successes}（{result.count}d{result.sides}，阈值{result.target}）"
-        return CommandResponse("ww" if metadata.get("detailed") else "w", args, result, rendered, {"count": count, "target": target})
+            rendered_items = []
+            for result in results:
+                values["res"] = result.render_c(notation, detailed=detailed)
+                rendered_items.append(
+                    self.messages.render(
+                        "strRollDiceReason" if reason else "strRollDice",
+                        values,
+                    )
+                )
+            rendered = "\n".join(rendered_items)
+        response_metadata = {
+            **metadata,
+            "count": count,
+            "target": target,
+            "explode_at": explode_at,
+            "repeat": repeat,
+            "reason": reason,
+        }
+        if metadata.get("hidden") and context.source.kind != "private":
+            response_metadata["private_rendered"] = rendered
+            rendered = self.messages.render(
+                "strRollHidden", self._message_values(context, {"pc": display_name})
+            )
+        result_value: PoolResult | list[PoolResult] = results[0] if repeat == 1 else results
+        return CommandResponse(
+            "ww" if detailed else "w", args, result_value, rendered, response_metadata
+        )
 
     def _handle_action(
         self, context: MessageContext, args: str, metadata: dict[str, Any]
@@ -1532,18 +2044,29 @@ class CommandRouter:
         body = args.strip()
         if body.casefold() in {"on", "off"}:
             session = self._session_for(context)
-            session.data["me_enabled"] = body.casefold() == "on"
+            requested = body.casefold() == "on"
+            enabled = session.data.get("me_enabled", True)
+            changed = enabled != requested
+            session.data["me_enabled"] = requested
             return CommandResponse(
                 "me",
                 args,
-                session.data["me_enabled"],
+                requested,
                 self.messages.render(
-                    "strMeOn" if session.data["me_enabled"] else "strMeOff",
+                    (
+                        "strMeOn" if requested and changed else
+                        "strMeOnAlready" if requested else
+                        "strMeOff" if changed else "strMeOffAlready"
+                    ),
                     self._message_values(context),
                 ),
             )
         if not body:
-            raise CommandError(".me requires an action")
+            raise CommandError(self.messages.render("strActionEmpty", self._message_values(context)))
+        if self._session_for(context).data.get("me_enabled", True) is False:
+            raise CommandError(
+                self.messages.render("strMEDisabledErr", self._message_values(context))
+            )
         return CommandResponse("me", args, {"actor": context.actor.to_dict(), "action": body}, f"{self.identities.nicknames.resolve(context)}{body}")
 
     def _handle_jrrp(
@@ -1552,8 +2075,22 @@ class CommandRouter:
         session = self._session_for(context)
         operation = args.strip().casefold()
         if operation in {"on", "off"}:
-            session.data["jrrp_enabled"] = operation == "on"
-            return CommandResponse("jrrp", args, session.data["jrrp_enabled"], f"jrrp已{operation}")
+            requested = operation == "on"
+            enabled = session.data.get("jrrp_enabled", True)
+            changed = enabled != requested
+            session.data["jrrp_enabled"] = requested
+            key = (
+                "strJrrpOn" if requested and changed else
+                "strJrrpOnAlready" if requested else
+                "strJrrpOff" if changed else "strJrrpOffAlready"
+            )
+            return CommandResponse(
+                "jrrp", args, requested,
+                self.messages.render(key, self._message_values(context)),
+                {"enabled": requested, "changed": changed},
+            )
+        if session.data.get("jrrp_enabled", True) is False:
+            raise CommandError("在本群中JRRP功能已被禁用")
         key = f"jrrp:{date.today().isoformat()}:{context.actor.key}"
         values = session.data.setdefault("jrrp_values", {})
         if key not in values:
@@ -1573,14 +2110,32 @@ class CommandRouter:
     ) -> CommandResponse:
         session = self._session_for(context)
         body = args.strip()
+        if not body:
+            return self._handle_help(context, "welcome", {"command": "help"})
+        if context.source.kind == "private":
+            raise CommandError(
+                self.messages.render("strWelcomePrivate", self._message_values(context))
+            )
         if body.casefold() == "clr":
-            session.data.pop("welcome", None)
-            return CommandResponse("welcome", args, None, "欢迎词已清空")
+            existed = session.data.pop("welcome", None) is not None
+            return CommandResponse(
+                "welcome", args, None,
+                self.messages.render(
+                    "strWelcomeMsgClearNotice" if existed else "strWelcomeMsgClearErr",
+                    self._message_values(context),
+                ),
+            )
         if body.casefold() == "show" or not body:
             value = session.data.get("welcome")
-            return CommandResponse("welcome", args, value, value or "未设置欢迎词")
+            return CommandResponse(
+                "welcome", args, value,
+                value or self.messages.render("strWelcomeMsgEmpty", self._message_values(context)),
+            )
         session.data["welcome"] = body
-        return CommandResponse("welcome", args, body, f"欢迎词已设置：{body}")
+        return CommandResponse(
+            "welcome", args, body,
+            self.messages.render("strWelcomeMsgUpdateNotice", self._message_values(context)),
+        )
 
     def _handle_draw(
         self, context: MessageContext, args: str, metadata: dict[str, Any]
@@ -1591,35 +2146,64 @@ class CommandRouter:
         name = body[1:].strip() if body.startswith("_") else (body[1:].strip() if body.casefold().startswith("h ") else body)
         parts = name.split()
         if not parts:
-            raise CommandError(".draw requires a deck name")
-        count = int(parts[1]) if len(parts) > 1 else 1
-        if count < 1:
-            raise CommandError("draw count must be positive")
+            help_response = self._handle_help(context, "draw/deck", {"command": "help"})
+            return CommandResponse("draw", args, {}, help_response.rendered)
+        try:
+            count = int(parts[1]) if len(parts) > 1 else 1
+        except ValueError as error:
+            raise CommandError(
+                self.messages.render("strParaIllegal", self._message_values(context))
+            ) from error
+        if count == 0:
+            raise CommandError(
+                self.messages.render("strNumCannotBeZero", self._message_values(context))
+            )
+        if count < 0:
+            raise CommandError(
+                self.messages.render("strParaIllegal", self._message_values(context))
+            )
         if parts[0] in session.decks:
             entries = []
+            exhausted = False
             for _ in range(count):
                 if session.decks[parts[0]].remaining == 0:
+                    exhausted = True
                     break
                 entries.append(session.draw(parts[0]))
+            exhausted = exhausted or session.decks[parts[0]].remaining == 0
             if not entries:
-                raise CommandError(f"deck {parts[0]!r} is empty")
+                raise CommandError(
+                    self.messages.render(
+                        "strDeckRestEmpty",
+                        self._message_values(context, {"deck_name": parts[0]}),
+                    )
+                )
         elif parts[0] in _PUBLIC_DECKS:
             remaining = list(_PUBLIC_DECKS[parts[0]])
             entries = []
             for _ in range(min(count, len(remaining))):
                 entries.append(DeckEntry(remaining.pop(self.roller.randint(0, len(remaining) - 1))))
         else:
-            raise CommandError(f"deck {parts[0]!r} does not exist")
+            raise CommandError(
+                self.messages.render(
+                    "strDeckNotFound",
+                    self._message_values(context, {"deck_name": parts[0]}),
+                )
+            )
         result = [entry.value for entry in entries]
         actual_count = len(entries)
         values = self._message_values(
             context,
-            {"res": "、".join(result), "cnt": actual_count},
+            {"res": "|".join(result), "cnt": actual_count},
         )
         rendered = self.messages.render(
             "strDrawHidden" if hidden else "strDrawCard",
             values,
         )
+        if exhausted:
+            rendered += "\n" + self.messages.render(
+                "strDeckEmpty", self._message_values(context)
+            )
         response_metadata = {"hidden": hidden, "count": actual_count}
         if hidden:
             response_metadata["private_rendered"] = self.messages.render("strDrawCard", values)
@@ -1636,44 +2220,116 @@ class CommandRouter:
     ) -> CommandResponse:
         session = self._session_for(context)
         parts = args.strip().split(maxsplit=1)
-        operation = parts[0].casefold() if parts else "show"
+        if not parts:
+            help_response = self._handle_help(context, "draw/deck", {"command": "help"})
+            return CommandResponse("deck", args, {}, help_response.rendered)
+        operation = parts[0].casefold()
         value = parts[1].strip() if len(parts) == 2 else ""
+        if "=" in operation:
+            operation, inline_value = operation.split("=", 1)
+            value = " ".join(item for item in (inline_value, value) if item)
         if operation == "show":
             if value and value in session.decks:
                 result = {value: session.decks[value].to_dict()}
+                deck = session.decks[value]
+                rendered = self.messages.render(
+                    "strDeckRestShow",
+                    self._message_values(
+                        context,
+                        {
+                            "deck_name": value,
+                            "deck_rest": " | ".join(
+                                deck.entries[index].value for index in deck._remaining
+                            ),
+                        },
+                    ),
+                )
+            elif value:
+                raise CommandError(
+                    self.messages.render(
+                        "strDeckNotFound",
+                        self._message_values(context, {"deck_name": value}),
+                    )
+                )
             else:
                 result = {name: deck.remaining for name, deck in session.decks.items()}
-            return CommandResponse("deck", args, result, str(result))
+                rendered = self.messages.render(
+                    "strDeckListShow" if result else "strDeckListEmpty",
+                    self._message_values(
+                        context,
+                        {"res": " ".join(f"{name}[{remaining}]" for name, remaining in result.items())},
+                    ),
+                )
+            return CommandResponse("deck", args, result, rendered)
         if operation == "clr":
             session.decks.clear()
-            return CommandResponse("deck", args, {}, "牌堆已清空")
+            return CommandResponse(
+                "deck", args, {},
+                self.messages.render("strDeckListClr", self._message_values(context)),
+            )
         if operation == "reset":
             if value not in session.decks:
-                raise CommandError(f"deck {value!r} does not exist")
+                raise CommandError(
+                    self.messages.render(
+                        "strDeckNotFound", self._message_values(context, {"deck_name": value})
+                    )
+                )
             session.decks[value].reset()
-            return CommandResponse("deck", args, session.decks[value].remaining, f"牌堆 {value} 已重置")
+            return CommandResponse(
+                "deck", args, session.decks[value].remaining,
+                self.messages.render(
+                    "strDeckRestReset", self._message_values(context, {"deck_name": value})
+                ),
+            )
         if operation == "del":
             if value not in session.decks:
-                raise CommandError(f"deck {value!r} does not exist")
+                raise CommandError(
+                    self.messages.render(
+                        "strDeckNotFound", self._message_values(context, {"deck_name": value})
+                    )
+                )
             del session.decks[value]
-            return CommandResponse("deck", args, {}, f"牌堆 {value} 已删除")
+            return CommandResponse(
+                "deck", args, {},
+                self.messages.render("strDeckDelete", self._message_values(context, {"deck_name": value})),
+            )
         if operation in {"new", "set"}:
             if "=" in value:
                 name, raw_entries = (item.strip() for item in value.split("=", 1))
             else:
                 tokens = value.split(maxsplit=1)
-                name = tokens[0] if tokens else ""
-                raw_entries = value if operation == "set" else (tokens[1] if len(tokens) == 2 else "")
+                if operation == "new":
+                    name = tokens[0] if tokens else ""
+                    raw_entries = tokens[1] if len(tokens) == 2 else name
+                else:
+                    name = tokens[0] if tokens else ""
+                    raw_entries = value
             if operation == "set" and not raw_entries:
                 raw_entries = name
             if operation == "set" and raw_entries.casefold().startswith("range"):
                 range_tokens = raw_entries.split()
-                if len(range_tokens) != 3:
-                    raise CommandError(".deck set range lower upper")
-                lower, upper = (int(item) for item in range_tokens[1:])
+                if len(range_tokens) not in {2, 3, 4}:
+                    raise CommandError(".deck set range lower upper [step]")
+                try:
+                    lower = int(range_tokens[1])
+                    upper = int(range_tokens[2]) if len(range_tokens) >= 3 else 0
+                    step = int(range_tokens[3]) if len(range_tokens) == 4 else 1
+                except ValueError as error:
+                    raise CommandError(
+                        self.messages.render("strParaIllegal", self._message_values(context))
+                    ) from error
+                if lower == upper or step <= 0:
+                    raise CommandError(
+                        self.messages.render("strRangeEmpty", self._message_values(context))
+                    )
                 if lower > upper:
                     lower, upper = upper, lower
-                entries = [DeckEntry(str(item)) for item in range(lower, upper + 1)]
+                if upper - lower > 1000 * step:
+                    raise CommandError(
+                        self.messages.render("strOutRange", self._message_values(context))
+                    )
+                entries = [DeckEntry(str(item)) for item in range(lower, upper + 1, step)]
+                raw_entries = f"range{lower}~{entries[-1].value}"
             elif operation == "set" and raw_entries in _PUBLIC_DECKS:
                 entries = [DeckEntry(item) for item in _PUBLIC_DECKS[raw_entries]]
             elif operation == "set" and raw_entries.casefold() == "member":
@@ -1681,9 +2337,31 @@ class CommandRouter:
             else:
                 entries = [DeckEntry(item.strip()) for item in raw_entries.split("|") if item.strip()]
             if not name or not entries:
-                raise CommandError(".deck new/set expects name=entry|entry")
+                raise CommandError(
+                    self.messages.render("strDeckNewEmpty", self._message_values(context))
+                )
+            if name not in session.decks and len(session.decks) >= 10:
+                raise CommandError(
+                    self.messages.render("strDeckListFull", self._message_values(context))
+                )
+            if len(entries) > 256:
+                raise CommandError(
+                    self.messages.render("strDeckOversize", self._message_values(context))
+                )
             session.configure_deck(name, entries)
-            return CommandResponse("deck", args, name, f"牌堆已创建：{name}")
+            key = "strDeckNew" if operation == "new" else (
+                "strDeckSet" if name == raw_entries else "strDeckSetRename"
+            )
+            return CommandResponse(
+                "deck", args, name,
+                self.messages.render(
+                    key,
+                    self._message_values(
+                        context,
+                        {"deck_name": name, "deck_cited": raw_entries},
+                    ),
+                ),
+            )
         raise CommandError(f"unknown .deck operation: {operation}")
 
     def _handle_ank(
@@ -1691,30 +2369,84 @@ class CommandRouter:
     ) -> CommandResponse:
         session = self._session_for(context)
         parts = args.strip().split(maxsplit=1)
-        operation = parts[0].casefold() if parts else "show"
+        if not parts:
+            help_response = self._handle_help(context, "ak", {"command": "help"})
+            return CommandResponse("ak", args, {}, help_response.rendered)
+        operation = parts[0].casefold()
         value = parts[1].strip() if len(parts) == 2 else ""
         state = session.data.setdefault("ank", {"title": "", "options": []})
         if operation in {"new", "#"}:
             state["title"] = value
             state["options"] = []
         elif operation in {"add", "+"}:
-            state["options"].extend(item.strip() for item in value.split("|") if item.strip())
+            additions = [item.strip() for item in value.split("|") if item.strip()]
+            if not additions:
+                raise CommandError(
+                    self.messages.render("strAkAddEmpty", self._message_values(context))
+                )
+            state["options"].extend(additions)
         elif operation in {"del", "-"}:
-            index = int(value) - 1
+            try:
+                index = int(value) - 1
+            except ValueError as error:
+                raise CommandError(
+                    self.messages.render("strAkNumErr", self._message_values(context))
+                ) from error
             if not 0 <= index < len(state["options"]):
-                raise CommandError("option index out of range")
+                raise CommandError(
+                    self.messages.render("strAkNumErr", self._message_values(context))
+                )
             state["options"].pop(index)
         elif operation in {"get", "="}:
             if not state["options"]:
-                raise CommandError("no ank options")
+                raise CommandError(
+                    self.messages.render("strAkOptEmptyErr", self._message_values(context))
+                )
             selected = state["options"][self.roller.randint(0, len(state["options"]) - 1)]
+            fork = state["title"]
+            options = "\n".join(
+                f"{index}. {option}" for index, option in enumerate(state["options"], start=1)
+            )
+            selected_index = state["options"].index(selected) + 1
             state["options"] = []
-            return CommandResponse("ak", args, selected, f"抽中：{selected}")
+            return CommandResponse(
+                "ak", args, selected,
+                self.messages.render(
+                    "strAkGet",
+                    self._message_values(
+                        context,
+                        {"fork": fork, "li": options, "get": f"{selected_index}. {selected}"},
+                    ),
+                ),
+            )
         elif operation == "clr":
             state["title"], state["options"] = "", []
         elif operation != "show":
             raise CommandError(f"unknown .ak operation: {operation}")
-        return CommandResponse("ak", args, dict(state), f"{state['title']}：{state['options']}")
+        options = "\n".join(
+            f"{index}. {option}" for index, option in enumerate(state["options"], start=1)
+        )
+        if operation in {"new", "#"}:
+            rendered = self.messages.render(
+                "strAkForkNew", self._message_values(context, {"fork": state["title"]})
+            )
+        elif operation in {"add", "+"}:
+            rendered = self.messages.render(
+                "strAkAdd", self._message_values(context, {"fork": state["title"], "li": options})
+            )
+        elif operation in {"del", "-"}:
+            rendered = self.messages.render(
+                "strAkDel", self._message_values(context, {"fork": state["title"], "li": options})
+            )
+        elif operation == "clr":
+            rendered = self.messages.render(
+                "strAkClr", self._message_values(context, {"fork": state["title"]})
+            )
+        else:
+            rendered = self.messages.render(
+                "strAkShow", self._message_values(context, {"fork": state["title"], "li": options})
+            )
+        return CommandResponse("ak", args, dict(state), rendered)
 
     def _handle_rules(
         self, context: MessageContext, args: str, metadata: dict[str, Any]
@@ -1724,7 +2456,11 @@ class CommandRouter:
         if body.casefold().startswith("set"):
             rule = body[3:].strip()
             session.data["rules_default"] = rule or None
-            return CommandResponse(metadata.get("command", "rules"), args, rule or None, f"默认规则：{rule or 'COC'}")
+            key = "strRuleSet" if rule else "strRuleReset"
+            return CommandResponse(
+                metadata.get("command", "rules"), args, rule or None,
+                self.messages.render(key, self._message_values(context, {"rule": rule or "COC"})),
+            )
         if not body:
             raise CommandError(".rules requires a query or set [rule]")
         if ":" in body or "：" in body:
@@ -1734,25 +2470,60 @@ class CommandRouter:
         if query.casefold().startswith("s "):
             query = query[2:].strip()
         result = {"rule": rule, "query": query.strip(), "found": False}
-        return CommandResponse(metadata.get("command", "rules"), args, result, f"规则查询（{rule}）：{query.strip()}，核心模块未内置词库")
+        return CommandResponse(
+            metadata.get("command", "rules"), args, result,
+            self.messages.render(
+                "strRuleErr", self._message_values(context, {"err": "核心模块未内置词库"})
+            ),
+        )
 
     def _handle_log(
         self, context: MessageContext, args: str, metadata: dict[str, Any]
     ) -> CommandResponse:
         session = self._session_for(context)
         parts = args.strip().split(maxsplit=1)
-        operation = parts[0].casefold() if parts else "show"
+        if not parts:
+            help_response = self._handle_help(context, "log", {"command": "help"})
+            return CommandResponse("log", args, {}, help_response.rendered)
+        operation = parts[0].casefold()
         name = parts[1].strip() if len(parts) == 2 else ""
+        log = session.data.get("log")
         if operation == "new":
-            session.data["log"] = {"name": name or date.today().isoformat(), "enabled": True, "entries": []}
-        elif operation in {"on", "off"}:
-            session.data.setdefault("log", {"name": date.today().isoformat(), "entries": []})["enabled"] = operation == "on"
+            log = {"name": name or date.today().isoformat(), "enabled": True, "entries": []}
+            session.data["log"] = log
+            key = "strLogNew"
+        elif operation == "on":
+            if not log:
+                log = {"name": name or date.today().isoformat(), "enabled": True, "entries": []}
+                session.data["log"] = log
+                key = "strLogNew"
+            elif log.get("enabled"):
+                key = "strLogOnAlready"
+            else:
+                log["enabled"] = True
+                key = "strLogOn"
+        elif operation == "off":
+            if not log:
+                raise CommandError(self.messages.render("strLogNullErr", self._message_values(context)))
+            if not log.get("enabled"):
+                key = "strLogOffAlready"
+            else:
+                log["enabled"] = False
+                key = "strLogOff"
         elif operation == "end":
-            session.data.setdefault("log", {})["enabled"] = False
-        elif operation != "show":
+            if not log:
+                raise CommandError(self.messages.render("strLogNullErr", self._message_values(context)))
+            log["enabled"] = False
+            log["ended"] = True
+            key = "strLogEndEmpty"
+        else:
             raise CommandError(f"unknown .log operation: {operation}")
         result = session.data.get("log", {"enabled": False})
-        return CommandResponse("log", args, result, str(result))
+        rendered = self.messages.render(
+            key,
+            self._message_values(context, {"game": {"log_name": result.get("name", "")}}),
+        )
+        return CommandResponse("log", args, result, rendered)
 
     @staticmethod
     def _handle_adapter_boundary(
@@ -1785,6 +2556,49 @@ class CommandRouter:
             result.update(values)
         return result
 
+    @staticmethod
+    def _render_roulette_list(roulettes: dict[str, Any]) -> str:
+        return "\n".join(
+            f"D{sides}"
+            for sides, value in sorted(roulettes.items(), key=lambda item: int(item[0]))
+        )
+
+    def _render_game_state(self, context: MessageContext, session: DiceSession) -> str:
+        game_id = str(session.data.get("game_id", session.data.get("name", session.session_id)))
+        if not session.data.get("game_active", False):
+            return self.messages.render(
+                "strGameVoidHere",
+                self._message_values(context, {"game_id": game_id}),
+            )
+        lines = [f"桌号: {game_id}"]
+        if "rule" in session.data:
+            lines.append(f"规则: {session.data['rule']}")
+        log = session.data.get("log")
+        if isinstance(log, dict) and log.get("enabled"):
+            lines.append(f"日志记录中:{log.get('name', '')}")
+        if session.game_masters:
+            lines.append("GM: " + " & ".join(sorted(actor.user_id for actor in session.game_masters)))
+        if session.players:
+            lines.append("PL:\n" + "\n".join(sorted(actor.user_id for actor in session.players)))
+        if session.observers:
+            lines.append("OB:\n" + "\n".join(sorted(actor.user_id for actor in session.observers)))
+        if session.roulettes:
+            lines.append("轮盘骰: D" + "/".join(str(face) for face in sorted(session.roulettes)))
+        return "\n".join(lines)
+
+    @staticmethod
+    def _render_dnd_cards(cards: list[dict[str, Any]]) -> str:
+        rendered: list[str] = []
+        for attributes in cards:
+            values = sorted(
+                (int(value) for value in attributes.values() if isinstance(value, (int, float))),
+                reverse=True,
+            )
+            rendered.append(
+                "".join(f"{value:2d} /" for value in values) + f"总计{sum(values)}"
+            )
+        return "\n".join(rendered)
+
     def _ensure_card(self, context: MessageContext) -> CharacterCard:
         card = self.identities.characters.resolve(context)
         if card is not None:
@@ -1804,24 +2618,162 @@ class CommandRouter:
         return f"{name} {index}"
 
     def _generate_coc_attributes(self, variant: int) -> dict[str, Any]:
-        normal = ["力量", "体质", "体型", "敏捷", "外貌", "意志", "幸运"]
-        attributes = {name: self.roller.roll("3d6*5").total for name in normal}
-        attributes["智力"] = self.roller.roll("(2d6+6)*5").total
-        attributes["教育"] = self.roller.roll("(2d6+6)*5").total
-        attributes.update(
-            {
-                "生命": (attributes["体质"] + attributes["体型"]) // 10,
-                "理智": attributes["意志"],
-                "san": attributes["意志"],
-                "魔法": attributes["意志"] // 5,
-                "闪避": attributes["敏捷"] // 2,
-                "灵感": attributes["智力"],
-                "知识": attributes["教育"],
-                "__Type": f"COC{variant}",
-                "__DefaultDice": "d100",
-            }
+        if variant == 7:
+            expressions = (
+                ("力量", "3d6*5"),
+                ("体质", "3d6*5"),
+                ("体型", "(2d6+6)*5"),
+                ("敏捷", "3d6*5"),
+                ("外貌", "3d6*5"),
+                ("智力", "(2d6+6)*5"),
+                ("意志", "3d6*5"),
+                ("教育", "(2d6+6)*5"),
+                ("幸运", "3d6*5"),
+            )
+            attributes = {name: self.roller.roll(expression).total for name, expression in expressions}
+            without_luck = sum(attributes[name] for name, _ in expressions[:-1])
+            attributes["不含幸运合计"] = without_luck
+            attributes["含幸运合计"] = without_luck + attributes["幸运"]
+            attributes.update(self._coc7_derived_attributes(attributes))
+            return attributes
+
+        expressions = (
+            ("力量", "3d6"),
+            ("体质", "3d6"),
+            ("体型", "2d6+6"),
+            ("敏捷", "3d6"),
+            ("外貌", "3d6"),
+            ("智力", "2d6+6"),
+            ("意志", "3d6"),
+            ("教育", "3d6+3"),
         )
+        attributes = {name: self.roller.roll(expression).total for name, expression in expressions}
+        attributes["共计"] = sum(attributes.values())
+        attributes["资产"] = self.roller.roll("1d10").total
+        attributes.update(self._coc6_derived_attributes(attributes))
         return attributes
+
+    @staticmethod
+    def _coc7_derived_attributes(attributes: dict[str, Any]) -> dict[str, Any]:
+        strength = int(attributes["力量"])
+        constitution = int(attributes["体质"])
+        size = int(attributes["体型"])
+        dexterity = int(attributes["敏捷"])
+        power = int(attributes["意志"])
+        strength_size = strength + size
+        if strength_size <= 64:
+            damage_bonus, build = "-2", -2
+        elif strength_size <= 84:
+            damage_bonus, build = "-1", -1
+        elif strength_size <= 124:
+            damage_bonus, build = "0", 0
+        elif strength_size <= 164:
+            damage_bonus, build = "1D4", 1
+        elif strength_size <= 204:
+            damage_bonus, build = "1d6", 2
+        else:
+            damage_bonus, build = "计算错误!", "计算错误"
+        if dexterity < size and strength < size:
+            movement = 7
+        elif dexterity > size and strength > size:
+            movement = 9
+        else:
+            movement = 8
+        return {
+            "理智": power,
+            "生命值": (constitution + size) // 10,
+            "魔法值": power // 5,
+            "伤害奖励": damage_bonus,
+            "体格": build,
+            "移动力": movement,
+        }
+
+    @staticmethod
+    def _coc6_derived_attributes(attributes: dict[str, Any]) -> dict[str, Any]:
+        strength = int(attributes["力量"])
+        constitution = int(attributes["体质"])
+        size = int(attributes["体型"])
+        power = int(attributes["意志"])
+        strength_size = strength + size
+        if strength_size <= 12:
+            damage_bonus = "-1D6"
+        elif strength_size <= 16:
+            damage_bonus = "-1D4"
+        elif strength_size <= 24:
+            damage_bonus = "0"
+        elif strength_size <= 32:
+            damage_bonus = "1D4"
+        elif strength_size <= 40:
+            damage_bonus = "1D6"
+        else:
+            damage_bonus = "计算错误!"
+        return {
+            "理智": power * 5,
+            "灵感": int(attributes["智力"]) * 5,
+            "幸运": power * 5,
+            "知识": int(attributes["教育"]) * 5,
+            "生命值": math.ceil((constitution + size) / 2),
+            "魔法值": power,
+            "伤害奖励": damage_bonus,
+        }
+
+    @staticmethod
+    def _render_coc_attributes(
+        attributes: dict[str, Any], variant: int, detailed: bool, count: int
+    ) -> str:
+        if variant == 7 and not detailed:
+            names = ("力量", "体质", "体型", "敏捷", "外貌", "智力", "意志", "教育", "幸运")
+            values = " ".join(f"{name}:{attributes[name]}" for name in names)
+            return f"{values} 共计:{attributes['不含幸运合计']}/{attributes['含幸运合计']}"
+        if variant == 6 and not detailed:
+            names = ("力量", "体质", "体型", "敏捷", "外貌", "智力", "意志", "教育")
+            values = " ".join(
+                f"{name}:{attributes[name]}" + ("  " if count != 1 and attributes[name] < 10 else "")
+                for name in names
+            )
+            return f"{values} 共计:{attributes['共计']} 资产:{attributes['资产']}"
+        if variant == 7:
+            return "\n".join(
+                (
+                    f"力量STR=3D6*5={attributes['力量']}/{attributes['力量'] // 2}/{attributes['力量'] // 5}",
+                    f"体质CON=3D6*5={attributes['体质']}/{attributes['体质'] // 2}/{attributes['体质'] // 5}",
+                    f"体型SIZ=(2D6+6)*5={attributes['体型']}/{attributes['体型'] // 2}/{attributes['体型'] // 5}",
+                    f"敏捷DEX=3D6*5={attributes['敏捷']}/{attributes['敏捷'] // 2}/{attributes['敏捷'] // 5}",
+                    f"外貌APP=3D6*5={attributes['外貌']}/{attributes['外貌'] // 2}/{attributes['外貌'] // 5}",
+                    f"智力INT=(2D6+6)*5={attributes['智力']}/{attributes['智力'] // 2}/{attributes['智力'] // 5}",
+                    f"意志POW=3D6*5={attributes['意志']}/{attributes['意志'] // 2}/{attributes['意志'] // 5}",
+                    f"教育EDU=(2D6+6)*5={attributes['教育']}/{attributes['教育'] // 2}/{attributes['教育'] // 5}",
+                    f"幸运LUCK=3D6*5={attributes['幸运']}",
+                    f"共计:{attributes['不含幸运合计']}/{attributes['含幸运合计']}",
+                    f"理智SAN=POW={attributes['理智']}",
+                    f"生命值HP=(SIZ+CON)/10={attributes['生命值']}",
+                    f"魔法值MP=POW/5={attributes['魔法值']}",
+                    f"伤害奖励DB={attributes['伤害奖励']}",
+                    f"体格={attributes['体格']}",
+                    f"移动力MOV={attributes['移动力']}",
+                )
+            )
+        return "\n".join(
+            (
+                f"力量STR=3D6={attributes['力量']}",
+                f"体质CON=3D6={attributes['体质']}",
+                f"体型SIZ=2D6+6={attributes['体型']}",
+                f"敏捷DEX=3D6={attributes['敏捷']}",
+                f"外貌APP=3D6={attributes['外貌']}",
+                f"智力INT=2D6+6={attributes['智力']}",
+                f"意志POW=3D6={attributes['意志']}",
+                f"教育EDU=3D6+3={attributes['教育']}",
+                f"共计:{attributes['共计']}",
+                f"理智SAN=POW*5={attributes['理智']}",
+                f"灵感IDEA=INT*5={attributes['灵感']}",
+                f"幸运LUCK=POW*5={attributes['幸运']}",
+                f"知识KNOW=EDU*5={attributes['知识']}",
+                f"生命值HP=(CON+SIZ)/2={attributes['生命值']}",
+                f"魔法值MP=POW={attributes['魔法值']}",
+                f"伤害奖励DB={attributes['伤害奖励']}",
+                f"资产=1D10={attributes['资产']}",
+            )
+        )
 
     @staticmethod
     def _split_repeat(args: str) -> tuple[int, str]:
@@ -1968,6 +2920,56 @@ class CommandRouter:
         return " ".join(f"{name}:{value}" for name, value in attributes.items())
 
     @staticmethod
+    def _render_card_attributes(card: CharacterCard) -> str:
+        visible = CommandRouter._visible_attributes(card.attributes)
+        if not visible:
+            return ""
+        if card.system.casefold() in {"coc", "coc7"}:
+            return CommandRouter._render_coc7_card_attributes(visible)
+        return " ".join(f"{name}:{value}" for name, value in visible.items())
+
+    @staticmethod
+    def _render_coc7_card_attributes(attributes: dict[str, Any]) -> str:
+        groups = (
+            ("职业", "年龄", "性别", "住地", "出身", "时代"),
+            ("力量", "体质", "体型", "敏捷", "外貌", "智力", "意志", "教育"),
+            ("生命", "理智", "魔法", "幸运"),
+            ("身体状态", "精神状态"),
+            ("DB", "闪避", "护甲"),
+        )
+        aliases = {
+            "生命": ("生命", "生命值", "hp"),
+            "魔法": ("魔法", "魔法值", "mp"),
+            "DB": ("DB", "伤害奖励"),
+        }
+        rendered_groups: list[str] = []
+        used: set[str] = set()
+        for group in groups:
+            parts: list[str] = []
+            for name in group:
+                candidates = aliases.get(name, (name,))
+                key = next((item for item in candidates if item in attributes), None)
+                if key is None and name == "闪避" and isinstance(attributes.get("敏捷"), (int, float)):
+                    value = int(attributes["敏捷"]) // 2
+                elif key is None:
+                    continue
+                else:
+                    value = attributes[key]
+                    used.add(key)
+                separator = "=" if name.startswith("&") else ":"
+                parts.append(f"{name}{separator}{value}")
+            if parts:
+                rendered_groups.append(" ".join(parts))
+        rest = "".join(
+            f"{key}:{value}" + (" " if isinstance(value, (int, float)) else "\t")
+            for key, value in attributes.items()
+            if key not in used and key not in {"体格", "移动力"}
+        ).rstrip()
+        if rest:
+            rendered_groups.append(rest)
+        return "\n".join(rendered_groups)
+
+    @staticmethod
     def _visible_attributes(attributes: dict[str, Any]) -> dict[str, Any]:
         return {key: value for key, value in attributes.items() if not key.startswith("__")}
 
@@ -1989,7 +2991,7 @@ class CommandRouter:
             context,
             {
                 "pc": response.card_name or response.display_name,
-                "res": response.result.render(),
+                "res": response.result.render_c(),
                 "reason": reason or "",
                 "dice_exp": response.result.normalized_expression,
                 "turn": metadata.get("repeat", 1),
@@ -2043,13 +3045,7 @@ class CommandRouter:
 
     @staticmethod
     def _render_check_roll(check: CheckResult) -> str:
-        if len(check.roll.terms) == 1:
-            term = check.roll.terms[0]
-            if term.kind in {"bonus", "penalty"}:
-                label = "奖励骰" if term.kind == "bonus" else "惩罚骰"
-                detail = " ".join(str(value) for value in term.extra_tens)
-                return f"{term.notation}={term.base_roll}[{label}:{detail}]={term.subtotal}"
-        return check.roll.render()
+        return check.roll.render_c()
 
     @staticmethod
     def _success_rank(success_level: str) -> int:

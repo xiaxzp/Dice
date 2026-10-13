@@ -52,6 +52,7 @@ class ManualCommandCoverageTest(unittest.TestCase):
                 self.assertTrue(response.command)
 
     def test_manual_stateful_operations(self):
+        self.run_command(".game new table")
         self.assertEqual(self.run_command(".ob on").result["enabled"], True)
         self.assertEqual(self.run_command(".ob off").result["enabled"], False)
         self.run_command(".ob join")
@@ -74,6 +75,27 @@ class ManualCommandCoverageTest(unittest.TestCase):
         self.assertEqual(self.run_command(".deck show").result["roles"], 2)
         self.run_command(".deck clr")
         self.assertEqual(self.run_command(".deck show").result, {})
+
+    def test_deck_new_uses_first_argument_as_name(self):
+        created_single = self.run_command(".deck new trpg")
+        self.assertEqual(created_single.result, "trpg")
+        self.assertNotIn("new", self.session.decks)
+        self.assertEqual(
+            [entry.value for entry in self.session.decks["trpg"].entries],
+            ["trpg"],
+        )
+
+        created = self.run_command(".deck new trpg investigator|keeper")
+        self.assertEqual(created.result, "trpg")
+        self.assertIn("<trpg>", created.rendered)
+        self.assertIn("trpg", self.session.decks)
+        self.assertEqual(
+            [entry.value for entry in self.session.decks["trpg"].entries],
+            ["investigator", "keeper"],
+        )
+
+        self.run_command(".deck new roles=wolf|villager")
+        self.assertIn("roles", self.session.decks)
 
         self.run_command(".ak new title")
         self.run_command(".ak add one|two")
@@ -99,6 +121,7 @@ class ManualCommandCoverageTest(unittest.TestCase):
         self.run_command(".deck set numbers=range 1 3")
         self.assertEqual(self.run_command(".deck show numbers").result["numbers"]["entries"][0]["value"], "1")
         self.assertTrue(self.run_command(".drawh numbers").metadata["hidden"])
+        self.assertIn("已经一张也不剩了", self.run_command(".draw numbers 2").rendered)
 
         self.run_command(".st san:70")
         sanity = self.run_command(".sc 0/1 直面外神")
@@ -106,7 +129,12 @@ class ManualCommandCoverageTest(unittest.TestCase):
 
         self.assertEqual(self.run_command(".ri2DK boss").metadata["expression"], "2d20k1")
         self.run_command(".init clr")
-        self.assertEqual(self.run_command(".init").result, [])
+        self.assertIn("先攻", self.run_command(".init").rendered)
+
+    def test_c_style_state_and_help_boundaries(self):
+        self.assertEqual(self.run_command(".welcome").result, {"welcome": "欢迎词：.welcome [文本|show|clr]"})
+        self.assertIn("[0]<COC7>角色卡", self.run_command(".pc list").rendered)
+        self.assertIn("没有保存先攻表", self.run_command(".init show").rendered)
 
     def test_manual_reason_before_expression_and_auto_success(self):
         roll = self.run_command(".r 伤害:d6")
@@ -142,8 +170,11 @@ class ManualCommandCoverageTest(unittest.TestCase):
         created = self.run_command(".pc new investigator")
         self.assertEqual(created.result.name, "investigator")
         self.run_command(".pc tag investigator")
-        self.run_command(".st 力量:60")
-        self.assertEqual(self.run_command(".pc show").result["attributes"]["力量"], 60)
+        self.run_command(".st 敏捷:50 力量:60")
+        shown = self.run_command(".pc show")
+        self.assertEqual(shown.result["attributes"]["力量"], 60)
+        self.assertLess(shown.rendered.index("力量:60"), shown.rendered.index("敏捷:50"))
+        self.assertIn("闪避:25", shown.rendered)
         self.run_command(".pc nn renamed")
         self.assertEqual(self.run_command(".pc show").result["name"], "renamed")
         self.run_command(".pc del")

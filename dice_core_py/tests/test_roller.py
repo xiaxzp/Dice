@@ -47,6 +47,11 @@ class DiceRollerTest(unittest.TestCase):
         self.assertEqual(bonus.total, 10)
         self.assertEqual(penalty.total, 100)
 
+    def test_maximum_handles_dice_and_subtraction(self):
+        roller = DiceRoller()
+        self.assertEqual(roller.maximum("1d6"), 6)
+        self.assertEqual(roller.maximum("1d6-1d3"), 5)
+
     def test_limits_and_errors(self):
         roller = DiceRoller()
         with self.assertRaises(DiceExpressionError):

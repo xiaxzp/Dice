@@ -135,7 +135,7 @@ class DicePlugin(MaiBotPlugin):
                     dispatch.reply,
                     dispatch.stream_id,
                     set_reply=True,
-                    reply_message=message,
+                    reply_message_id=self._message_field(message, "message_id") or "",
                 )
                 self.ctx.logger.info("[TRPG Dice] 回复发送成功: stream_id=%r", dispatch.stream_id)
             else:

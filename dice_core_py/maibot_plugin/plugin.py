@@ -131,7 +131,12 @@ class DicePlugin(MaiBotPlugin):
                     dispatch.stream_id,
                     len(dispatch.reply),
                 )
-                await self.ctx.send.text(dispatch.reply, dispatch.stream_id)
+                await self.ctx.send.text(
+                    dispatch.reply,
+                    dispatch.stream_id,
+                    set_reply=True,
+                    reply_message=message,
+                )
                 self.ctx.logger.info("[TRPG Dice] 回复发送成功: stream_id=%r", dispatch.stream_id)
             else:
                 self.ctx.logger.error("[TRPG Dice] 没有可用 stream_id，无法发送回复")

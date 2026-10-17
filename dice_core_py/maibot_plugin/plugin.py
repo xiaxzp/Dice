@@ -26,7 +26,7 @@ class DicePluginConfig(PluginConfigBase):
     qq_only: bool = Field(default=True, description="是否只处理 QQ 消息")
     prefixes: list[str] = Field(
         default=list(DEFAULT_PREFIXES),
-        description="触发骰子指令的消息前缀，例如 .、。或！",
+        description="触发骰子指令的消息前缀，仅支持 . 或 。",
     )
 
 
@@ -67,7 +67,7 @@ class DicePlugin(MaiBotPlugin):
 
     @Command(
         "dice",
-        description="处理 .、/、。等前缀的 TRPG 骰子指令",
+        description="处理以 . 或 。 开头的 TRPG 骰子指令",
         pattern=DICE_COMMAND_PATTERN,
     )
     async def handle_command(self, **kwargs: Any) -> tuple[bool, str, int]:

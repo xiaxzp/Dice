@@ -52,7 +52,9 @@ class MaiBotAdapterTest(unittest.TestCase):
         self.assertIsNotNone(pattern.search(".r 1"))
         self.assertIsNotNone(pattern.search(".r2#d6"))
         self.assertIsNotNone(pattern.search(".rc3#50"))
-        self.assertIsNotNone(pattern.search("!!rc luck"))
+        self.assertIsNotNone(pattern.search("。RC 幸运"))
+        self.assertIsNone(pattern.search("!!rc luck"))
+        self.assertIsNone(pattern.search("/roll d20"))
         self.assertIsNone(pattern.search("普通消息"))
         self.assertIsNone(pattern.search("？！"))
 
@@ -60,7 +62,7 @@ class MaiBotAdapterTest(unittest.TestCase):
         pattern = re.compile(DICE_COMMAND_PATTERN)
         for text in (
             ".r 1", ".r3#b hh", ".r2#d6", ".rc3#50", ".rcb2 50", ".rcp2 50",
-            ".rb", ".rp", "!!rc luck", "/roll d20", "。RC 幸运", ".ri2DK boss",
+            ".rb", ".rp", "。RC 幸运", ".ri2DK boss",
             ".coc6d", ".coc7s3", ".st射击40斗殴50", ".st name50",
             ".str strRollDice text", ".rc困难幸运", ".ak#title", ".ak+one|two",
             ".r 1d0", ".rc", ".sc", ".help", ".pc list", ".deck show",
@@ -76,7 +78,8 @@ class MaiBotAdapterTest(unittest.TestCase):
             ".hello", "/hello world", ".unknown", ".random", ".restart",
             ".status", ".statistics", ".cocoon", ".drawings", ".read", ".search",
             ".reply off", ".admin", ".cloud", ".send message",
-            ".group state", ".rdc", ".rdx", ".rsr", ".rbh", "？！", "普通消息",
+            ".group state", ".rdc", ".rdx", ".rsr", ".rbh",
+            "!!rc luck", "/roll d20", "!help", "/help", "．r 1", "？！", "普通消息",
         ):
             with self.subTest(text=text):
                 self.assertIsNone(pattern.search(text))
@@ -223,16 +226,16 @@ class MaiBotAdapterTest(unittest.TestCase):
         self.assertTrue(result.handled)
         self.assertIn("骰子指令错误", result.reply)
 
-    def test_configured_slash_prefix_is_normalized_for_core_router(self):
-        adapter = DiceCommandAdapter(self.temp_dir.name, prefixes=("/",))
-        result = adapter.dispatch(self.message("/r 1"))
+    def test_fullwidth_stop_prefix_is_normalized_for_core_router(self):
+        adapter = DiceCommandAdapter(self.temp_dir.name, prefixes=("。",))
+        result = adapter.dispatch(self.message("。r 1"))
         self.assertTrue(result.handled)
         self.assertEqual(result.response.command, "r")
 
-    def test_custom_symbol_prefix_keeps_command_ownership_check(self):
-        adapter = DiceCommandAdapter(self.temp_dir.name, prefixes=("#",))
-        self.assertTrue(adapter.dispatch(self.message("#r3#b hh")).handled)
-        self.assertFalse(adapter.dispatch(self.message("#hello")).handled)
+    def test_other_symbol_prefixes_are_not_claimed_by_default(self):
+        for text in ("!r 1", "/r 1", "#r3#b hh", "．r 1", "．hello"):
+            with self.subTest(text=text):
+                self.assertFalse(self.adapter.dispatch(self.message(text)).handled)
 
     def test_handle_sends_only_for_a_hit(self):
         sent = []
@@ -240,7 +243,7 @@ class MaiBotAdapterTest(unittest.TestCase):
         async def send_text(text, stream_id):
             sent.append((text, stream_id))
 
-        asyncio.run(self.adapter.handle(self.message("!r 1"), send_text=send_text))
+        asyncio.run(self.adapter.handle(self.message(".r 1"), send_text=send_text))
         asyncio.run(self.adapter.handle(self.message("普通消息"), send_text=send_text))
         asyncio.run(self.adapter.handle(self.message(".hello"), send_text=send_text))
         asyncio.run(self.adapter.handle(self.message(".status"), send_text=send_text))

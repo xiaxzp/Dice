@@ -26,9 +26,9 @@ from trpg_dice import (
 from trpg_dice.storage import JsonStore
 
 
-DEFAULT_PREFIXES = (".", "/", "。", "．", "!", "！")
+DEFAULT_PREFIXES = (".", "。")
 DICE_COMMAND_PATTERN = (
-    r"(?i)^[^\w\s]+\s*(?!rdc|rdx|rsr|rnc|rfc|rbh|rws)(?:"
+    r"(?i)^[.。]+\s*(?!rdc|rdx|rsr|rnc|rfc|rbh|rws)(?:"
     r"bot(?=\s+(?:on|off)\s*$)|"
     r"help|drawh?|name|nnn?|ob|setcoc|set|dnd|pc|init|ww?|me|jrrp|welcome|"
     r"deck|rules?|log|game|ti|li|en|str|"

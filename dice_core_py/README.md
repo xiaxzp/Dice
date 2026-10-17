@@ -615,8 +615,9 @@ python -m pip install -e dice_core_py
 cp -R dice_core_py /path/to/MaiBot/plugins/trpg-dice
 ```
 
-适配器实现、配置、兼容说明和前缀列表见 `maibot_plugin/README.md`。默认支持 `.`、`/`、
-`。`、`．`、`!`、`！`；人物卡和昵称数据使用 MaiBot 注入的插件专属 `data_dir`。
+适配器实现、配置、兼容说明和前缀列表见 `maibot_plugin/README.md`。为不劫持其他插件，
+`@Command` 只匹配以 `.`、`。` 开头的指令；人物卡和昵称数据使用 MaiBot 注入的插件专属
+`data_dir`。
 
 ### `.help` 和自定义命令
 
